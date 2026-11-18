@@ -1,0 +1,338 @@
+/* Weg ins Deutsche — offline app. Needs course.js, lessons-*.js and content.js loaded first. */
+(function () {
+"use strict";
+const LESSONS = window.LESSONS || {}, STORIES = window.STORIES || [], DRILLS = window.DRILLS || [];
+const ALL = PHASES.flatMap(p => p.lessons.map((l, i) => ({ id: l[0], title: l[1], focus: l[2], lvl: p.lvl === "A0" ? "A1" : p.lvl, phase: p.id, n: i + 1 })));
+const BYID = Object.fromEntries(ALL.map(l => [l.id, l]));
+const INT = [0, 1, 3, 7, 14, 30, 60, 120];
+
+/* ---------------- storage ---------------- */
+const K = "wid-";
+function get(k, d) { try { const v = localStorage.getItem(K + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function put(k, v) { try { localStorage.setItem(K + k, JSON.stringify(v)); } catch (e) {} }
+let S = Object.assign({ done: {}, hours: 0, days: {}, scores: {} }, get("progress", {}));
+let decks = get("decks", {});
+let ui = Object.assign({ view: "today", lesson: null, story: null, drill: null, dir: "de", lvl: null }, get("ui", {}));
+let ex = {}, review = null, storyState = get("storyState", {}), drill = null;
+const saveS = () => put("progress", S), saveDecks = () => put("decks", decks), saveUI = () => put("ui", { view: ui.view, lesson: ui.lesson, story: ui.story, drill: ui.drill, dir: ui.dir, lvl: ui.lvl });
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+/* ---------------- helpers ---------------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+const fmt = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+const today = () => fmt(new Date());
+function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return fmt(d); }
+const norm = s => String(s || "").toLowerCase().replace(/ß/g, "ss").replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[„“"'.,;:!?¿¡()–-]/g, " ").replace(/\s+/g, " ").trim();
+function lev(a, b) { const m = a.length, n = b.length; if (!m) return n; if (!n) return m; let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[n]; }
+function similarity(given, answers) { const g = norm(given); let best = 0; for (const a of answers) { const t = norm(a); if (!t) continue; const s = 1 - lev(g, t) / Math.max(g.length, t.length); if (s > best) best = s; } return best; }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function level() { let l = "A0"; for (const p of PHASES) { const d = p.lessons.filter(x => S.done[x[0]]).length; if (d / p.lessons.length >= .8) l = p.lvl; else break; } return l; }
+function workLevel() { const i = ["A0", "A1", "A2", "B1", "B2", "C1"].indexOf(level()); return ["A1", "A2", "B1", "B2", "C1"][Math.min(4, Math.max(0, i))]; }
+const nextLesson = () => ALL.find(l => !S.done[l.id]);
+const allCards = () => Object.entries(decks).flatMap(([id, d]) => (d.cards || []).map((c, i) => ({ deck: id, i, c })));
+const dueCards = () => { const t = today(); return allCards().filter(x => (x.c.d || t) <= t); };
+const todayLog = () => { const v = S.days[today()]; return v && typeof v === "object" ? v : {}; };
+function logAct(k) { const v = Object.assign({}, todayLog()); v[k] = 1; S.days[today()] = v; const ks = Object.keys(S.days).sort(); while (ks.length > 400) delete S.days[ks.shift()]; saveS(); }
+function streak() { let n = 0; const d = new Date(); if (!S.days[fmt(d)]) d.setDate(d.getDate() - 1); while (S.days[fmt(d)]) { n++; d.setDate(d.getDate() - 1); } return n; }
+const lvlIdx = l => ["A1", "A2", "B1", "B2", "C1"].indexOf(l);
+
+/* ---------------- speech (device voice, works offline) ---------------- */
+const synth = window.speechSynthesis || null;
+let deVoice = null;
+function pickVoice() { if (!synth) return; const vs = synth.getVoices(); deVoice = vs.find(v => /^de(-|_)DE/i.test(v.lang) && v.localService) || vs.find(v => /^de/i.test(v.lang)) || null; }
+if (synth) { pickVoice(); synth.onvoiceschanged = () => { pickVoice(); if (ui.view === "progress") render(); }; }
+function speak(lines, rate) {
+  if (!synth) return; synth.cancel();
+  (Array.isArray(lines) ? lines : [lines]).filter(Boolean).forEach(t => { const u = new SpeechSynthesisUtterance(String(t)); u.lang = "de-DE"; if (deVoice) u.voice = deVoice; u.rate = rate || ui.rate || 0.9; synth.speak(u); });
+}
+const stopSpeak = () => synth && synth.cancel();
+const canSpeak = () => !!synth;
+
+/* ---------------- views ---------------- */
+const NAV = [["today", "Today", '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>'],
+ ["lessons", "Lessons", '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/>'],
+ ["cards", "Cards", '<rect x="3" y="6" width="14" height="14" rx="2"/><path d="M7 3h12a2 2 0 0 1 2 2v12"/>'],
+ ["speak", "Speak", '<path d="M4 5h16v11H9l-5 4z"/>'],
+ ["read", "Read", '<path d="M2 5h7a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H2zM22 5h-7a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h8z"/>'],
+ ["progress", "Progress", '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>']];
+const listenBtn = (attr, label) => canSpeak() ? `<button class="btn small" ${attr}>▶ ${label || "Listen"}</button>` : "";
+
+function header() {
+  const d = ALL.filter(l => S.done[l.id]).length;
+  $("overallBar").style.width = (100 * d / ALL.length) + "%";
+  $("overallPct").textContent = d + "/" + ALL.length;
+  $("curLevel").textContent = level();
+  const due = dueCards().length;
+  $("nav").innerHTML = NAV.map(([k, l, p]) => `<button data-nav="${k}" ${ui.view === k ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24">${p}</svg>${l}${k === "cards" && due ? `<span class="dot">${due > 99 ? "99+" : due}</span>` : ""}</button>`).join("");
+}
+
+function vToday() {
+  const nl = nextLesson(), due = dueCards().length, log = todayLog(), lv = workLevel();
+  const dr = DRILLS.filter(x => lvlIdx(x.lvl) <= lvlIdx(lv)).find(x => !S.done[x.id]) || DRILLS.filter(x => x.lvl === lv)[0] || DRILLS[0];
+  const st = STORIES.filter(x => lvlIdx(x.lvl) <= lvlIdx(lv)).find(x => !S.done[x.id]) || STORIES.filter(x => x.lvl === lv)[0] || STORIES[0];
+  const tier = SERIES[Math.min(4, Math.max(0, lvlIdx(lv)))];
+  const total = allCards().length, known = allCards().filter(x => (x.c.b || 0) >= 3).length;
+  const step = (on, t, sub, btn) => `<div class="step"><span class="tick ${on ? "on" : ""}">${on ? "✓" : ""}</span><div><b>${t}</b><small>${sub}</small></div>${btn}</div>`;
+  return `<div class="hello"><div><div class="eyebrow">${new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div><h2>Hallo! Wie geht's?</h2></div>
+    <div class="streak"><b>${streak()}</b>day streak</div></div>
+  <section class="card"><h2>Today's hour</h2>
+   ${step(log.c || (!due && total), "Review cards · 15 min", due ? `${due} card${due > 1 ? "s" : ""} due` : (total ? "All caught up" : "Cards appear after your first lesson"), due ? `<button class="btn small primary" data-start-review>Review</button>` : "")}
+   ${step(log.l, "Lesson · 20 min", nl ? esc(nl.title) + " · " + nl.lvl : "Course complete", nl ? `<button class="btn small primary" data-open-lesson="${nl.id}">Start</button>` : "")}
+   ${step(log.t, "Speak · 10 min", esc(dr.title) + " · " + dr.lvl, `<button class="btn small" data-open-drill="${dr.id}">Speak</button>`)}
+   ${step(log.r, "Read & listen · 10 min", esc(st.title) + " · " + st.lvl, `<button class="btn small" data-open-story="${st.id}">Read</button>`)}
+   ${step(log.w, "Watch German · any time", esc(tier.shows[0][0]) + " · " + tier.subs, `<button class="btn small" data-watch>+30 min</button>`)}
+  </section>
+  <div class="stats">
+   <div class="stat"><b>${ALL.filter(l => S.done[l.id]).length}</b><span>lessons</span></div>
+   <div class="stat"><b>${known}</b><span>words known</span></div>
+   <div class="stat"><b>${Math.round(S.hours)}</b><span>hours heard</span></div>
+   <div class="stat"><b>${level()}</b><span>level</span></div>
+  </div>
+  <p class="note">Everything works offline. Your progress is saved on this phone; make a backup now and then from the Progress tab.</p>`;
+}
+
+function vLessons() {
+  if (ui.lesson && LESSONS[ui.lesson]) return vLesson(ui.lesson);
+  const nl = nextLesson();
+  return `<p class="intro">${ALL.length} lessons from your first word to C1. Each has an explanation, examples, a dialogue, new words for your cards and 7 exercises.</p>` +
+    PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length;
+      return `<section class="card"><div class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h2>${p.name}</h2><div class="when">${p.when} · ${d}/${p.lessons.length} done</div></div></div>
+      <div>${p.lessons.map((l, i) => { const done = S.done[l[0]], isNext = nl && nl.id === l[0];
+        return `<button class="lrow ${done ? "done" : ""} ${isNext ? "next" : ""}" data-open-lesson="${l[0]}"><span class="num">${String(i + 1).padStart(2, "0")}</span><span>${esc(l[1])}</span><span class="st">${done ? "✓ " + (S.scores[l[0]] ?? "") + "%" : isNext ? "NEXT" : "›"}</span></button>`; }).join("")}</div></section>`; }).join("");
+}
+
+function vLesson(id) {
+  const M = BYID[id], L = LESSONS[id], st = ex[id] || {};
+  const n = L.e.length, answered = Object.keys(st).length, ok = Object.values(st).filter(x => x.ok).length;
+  const t = L.t ? `<div class="tablewrap"><table><caption>${esc(L.t.c)}</caption><thead><tr>${L.t.h.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${L.t.r.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+  const exs = L.e.map((e, i) => { const s = st[i];
+    if (e[0] === "c") { const [, q, opts, ans, why] = e;
+      return `<div class="q"><div class="qt">${i + 1}. ${esc(q)}</div><div class="opts">${opts.map((o, j) => { let c = ""; if (s) { if (j === ans) c = "right"; else if (s.given === j) c = "wrong"; } return `<button class="opt ${c}" data-choice="${i}:${j}" ${s ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}">${s.ok ? "Richtig! " : "Not quite. "}${esc(why)}</div>` : ""}</div>`; }
+    const [, q, ans, , why] = e;
+    return `<div class="q"><div class="qt">${i + 1}. ${esc(q)}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}"><b>${esc(s.given)}</b><br>${s.ok ? (s.close ? "Almost! Check the spelling. " : "Richtig! ") : "Not quite. "}${esc(why)}${s.ok && !s.close ? "" : "<br>Model answer: " + esc(ans)}${!s.ok ? `<br><button class="btn small ghost" data-override="${i}">I was right</button>` : ""}</div>` :
+      `<div class="btnrow"><input class="field" style="flex:1;min-width:0" id="w-${i}" placeholder="Schreib auf Deutsch" autocomplete="off" autocapitalize="sentences" spellcheck="false"><button class="btn small primary" data-write="${i}">Check</button></div>`}</div>`; }).join("");
+  return `<button class="btn ghost back" data-back>‹ All lessons</button>
+  <div class="lesson-title"><span class="badge ${S.done[id] ? "done" : ""}">${PHASES.find(p => p.id === M.phase).lvl}</span><div><div class="eyebrow">Lesson ${M.n} · ${PHASES.find(p => p.id === M.phase).name}</div><h2>${esc(M.title)}</h2></div></div>
+  <section class="card"><div class="prose">${L.i.split(/\n\n+/).map(p => `<p>${md(p)}</p>`).join("")}</div>${t}</section>
+  <section class="card"><h3>Examples</h3><div>${L.x.map(e => `<div class="ex"><span class="es">${esc(e[0])}</span><span class="en">${esc(e[1])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-ex")}</div></section>
+  <section class="card"><h3>Dialogue</h3><p class="note">Tap a line to see the English.</p><div>${L.d.map(d => `<div class="line" data-reveal><span class="who">${esc(d[0])}</span><span>${esc(d[1])}</span><span class="en" hidden>${esc(d[2])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-dlg", "Listen to the dialogue")}</div></section>
+  <section class="card"><h3>New words</h3><p class="note">These go into your cards when you finish the lesson.</p><div class="vocab">${L.v.map(v => `<div><b>${esc(v[0])}</b><span>${esc(v[1])}</span></div>`).join("")}</div></section>
+  ${L.tip ? `<div class="tip"><b>Tip · </b>${esc(L.tip)}</div>` : ""}
+  <section class="card"><h3>Practice · ${ok}/${n}</h3><div>${exs}</div>
+   <div class="btnrow"><button class="btn primary" data-finish="${id}" ${answered < n ? "disabled" : ""}>${S.done[id] ? "Finish again" : "Finish lesson"}</button>${answered < n ? `<span class="note">Answer all ${n} to finish.</span>` : ""}</div></section>`;
+}
+
+function vCards() {
+  const all = allCards(), due = dueCards();
+  if (review) {
+    const cur = review.queue[0];
+    if (!cur) { const c = review.count; review = null; logAct("c"); return `<section class="card"><h2>Fertig!</h2><p>You reviewed ${c} card${c === 1 ? "" : "s"}. Come back tomorrow for the next ones.</p><button class="btn primary" data-nav-go="today">Back to today</button></section>`; }
+    const c = decks[cur.deck].cards[cur.i], front = ui.dir === "de" ? c.de : c.en, back = ui.dir === "de" ? c.en : c.de, b = c.b || 0;
+    const lab = x => { const d = INT[Math.min(7, x)]; return d === 0 ? "today" : d === 1 ? "1 day" : d < 30 ? d + " days" : Math.round(d / 30) + " mo"; };
+    return `<div class="btnrow" style="justify-content:space-between"><span class="eyebrow">${review.queue.length} left</span><button class="btn ghost" data-end-review>End</button></div>
+    <section class="card flash"><div class="front">${esc(front)}</div>${review.shown ? `<div class="back">${esc(back)}</div>${c.ex ? `<div class="exs">${esc(c.ex)}</div>` : ""}` : ""}${listenBtn("data-speak-card")}</section>
+    ${review.shown ? `<div class="grade"><button class="btn" data-grade="0">Again<small>today</small></button><button class="btn primary" data-grade="1">Good<small>${lab(b + 1)}</small></button><button class="btn" data-grade="2">Easy<small>${lab(b + 2)}</small></button></div>` : `<button class="btn primary" data-show>Show answer</button>`}`;
+  }
+  const known = all.filter(x => (x.c.b || 0) >= 3).length;
+  return `<section class="card"><h2>Flashcards</h2>
+    <div class="stats" style="grid-template-columns:repeat(3,1fr)"><div class="stat"><b>${due.length}</b><span>due now</span></div><div class="stat"><b>${known}</b><span>known</span></div><div class="stat"><b>${all.length}</b><span>total</span></div></div>
+    <div class="btnrow"><button class="btn primary" data-start-review ${due.length ? "" : "disabled"}>${due.length ? "Review " + Math.min(due.length, 60) + (due.length === 1 ? " card" : " cards") : "Nothing due"}</button>
+    <span class="seg" role="group" aria-label="Direction"><button data-dir="de" aria-pressed="${ui.dir === "de"}">DE → EN</button><button data-dir="en" aria-pressed="${ui.dir === "en"}">EN → DE</button></span></div>
+    <p class="note">Cards you know come back less often: tomorrow, then in 3 days, a week, two weeks, a month. Say the answer out loud before you tap Show answer.</p></section>
+  <section class="card"><h3>Add your own card</h3>
+    <div class="btnrow"><input class="field" style="flex:1 1 140px;min-width:0" id="newDe" placeholder="Deutsch" autocomplete="off"><input class="field" style="flex:1 1 140px;min-width:0" id="newEn" placeholder="English" autocomplete="off"><button class="btn" data-add-card>Add</button></div></section>
+  ${all.length ? `<section class="card"><h3>Your decks</h3><div>${Object.entries(decks).map(([k, d]) => `<div class="show"><span class="n">${esc(d.title || k)}</span><span class="w">${(d.cards || []).length} cards</span></div>`).join("")}</div></section>` : `<p class="note">Finish a lesson and its new words appear here.</p>`}`;
+}
+
+function vSpeak() {
+  if (ui.drill) { const D = DRILLS.find(x => x.id === ui.drill); if (D) return vDrill(D); }
+  const lv = workLevel();
+  return `<section class="card"><h2>Speak</h2><p class="note">Short role-plays. Read or listen to what the person says, then answer out loud and type it (tip: use your keyboard's microphone to dictate). The app checks your answer against natural replies.</p></section>` +
+    ["A1", "A2", "B1", "B2"].map(l => { const ds = DRILLS.filter(x => x.lvl === l); if (!ds.length) return "";
+      return `<section class="card"><div class="phase-head"><span class="badge ${lvlIdx(l) < lvlIdx(lv) ? "done" : ""}">${l}</span><div class="t"><h3>${l === lv ? "Your level" : l}</h3></div></div><div>${ds.map(d => `<button class="lrow ${S.done[d.id] ? "done" : ""}" data-open-drill="${d.id}"><span class="num">${d.turns.length}×</span><span>${esc(d.title)}<br><small class="note">${esc(d.who)}</small></span><span class="st">${S.done[d.id] ? "✓" : "›"}</span></button>`).join("")}</div></section>`; }).join("");
+}
+function vDrill(D) {
+  if (!drill || drill.id !== D.id) drill = { id: D.id, step: 0, results: [] };
+  const done = drill.step >= D.turns.length;
+  const past = D.turns.slice(0, drill.step).map((t, i) => { const r = drill.results[i] || {};
+    return `<div class="msg ai"><span>${esc(t[0])}</span></div><div class="msg me">${esc(r.given || "…")}</div><div class="fb ${r.grade === "good" ? "ok" : "no"}" style="justify-self:end;max-width:88%">${r.grade === "good" ? "Richtig!" : r.grade === "close" ? "Close!" : "Try this:"} ${r.grade === "good" ? "" : esc(t[3])}</div>`; }).join("");
+  let cur = "";
+  if (!done) { const t = D.turns[drill.step], r = drill.pending;
+    cur = `<div class="msg ai"><span>${esc(t[0])}</span><span class="tr" id="drillTr" hidden>${esc(t[1])}</span><span class="acts"><button class="btn small ghost" data-drill-tr>English</button>${canSpeak() ? `<button class="btn small ghost" data-say-line>▶ Listen</button>` : ""}</span></div>
+    <div class="tip"><b>Your turn · </b>${esc(t[2])}</div>
+    ${r ? `<div class="msg me">${esc(r.given)}</div><div class="fb ${r.grade === "good" ? "ok" : "no"}">${r.grade === "good" ? "Richtig! " : r.grade === "close" ? "Close! A natural answer: " : "A natural answer: "}<b>${esc(t[3])}</b>${canSpeak() ? ` <button class="btn small ghost" data-say-model>▶</button>` : ""}</div><div class="btnrow"><button class="btn primary" data-drill-next>${drill.step + 1 < D.turns.length ? "Next" : "Finish"}</button>${r.grade !== "good" ? `<button class="btn small ghost" data-drill-right>I was right</button>` : ""}</div>` :
+      `<div class="composer" style="grid-template-columns:1fr auto"><textarea class="field" id="drillBox" rows="2" placeholder="Antworte auf Deutsch…" autocapitalize="sentences" spellcheck="false"></textarea><button class="btn primary" data-drill-check>Check</button></div><button class="btn small ghost" data-drill-skip style="justify-self:start">Show me the answer</button>`}`; }
+  const good = drill.results.filter(r => r && r.grade === "good").length;
+  return `<button class="btn ghost back" data-drill-back>‹ All role-plays</button>
+  <section class="card"><div class="eyebrow">${D.lvl} · ${esc(D.who)}</div><h2>${esc(D.title)}</h2></section>
+  <div class="chat">${past}${cur}</div>
+  ${done ? `<section class="card"><h3>Gut gemacht!</h3><p>${good} of ${D.turns.length} answers matched a natural reply. Try it again tomorrow without looking.</p><div class="btnrow"><button class="btn primary" data-drill-restart>Do it again</button><button class="btn" data-drill-back>Other role-plays</button></div></section>` : ""}`;
+}
+
+function vRead() {
+  if (ui.story) { const s = STORIES.find(x => x.id === ui.story); if (s) return vStory(s); }
+  const lv = workLevel();
+  return `<section class="card"><h2>Read & listen</h2><p class="note">Short stories set in Germany, from A1 to C1. ${canSpeak() ? "Try listening first with the text blurred, then read." : "Tap a paragraph for the English."}</p></section>` +
+    ["A1", "A2", "B1", "B2", "C1"].map(l => { const ss = STORIES.filter(x => x.lvl === l);
+      return `<section class="card"><div class="phase-head"><span class="badge ${lvlIdx(l) < lvlIdx(lv) ? "done" : ""}">${l}</span><div class="t"><h3>${l === lv ? "Your level" : l}</h3></div></div><div>${ss.map(s => `<button class="lrow ${S.done[s.id] ? "done" : ""}" data-open-story="${s.id}"><span class="num">${s.p.length}¶</span><span>${esc(s.title)}</span><span class="st">${S.done[s.id] ? "✓" : "›"}</span></button>`).join("")}</div></section>`; }).join("");
+}
+function vStory(s) {
+  const stt = storyState[s.id] || (storyState[s.id] = { answers: {}, blur: false, added: false });
+  const qs = s.q.map((q, i) => { const a = stt.answers[i]; return `<div class="q"><div class="qt">${esc(q[0])}</div><div class="opts">${q[1].map((o, j) => { let c = ""; if (a !== undefined) { if (j === q[2]) c = "right"; else if (a === j) c = "wrong"; } return `<button class="opt ${c}" data-sq="${i}:${j}" ${a !== undefined ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div></div>`; }).join("");
+  return `<button class="btn ghost back" data-story-back>‹ All stories</button>
+  <section class="card ${stt.blur ? "blur" : ""}"><div class="eyebrow">${s.lvl} story</div><h2>${esc(s.title)}</h2>
+   ${canSpeak() ? `<div class="btnrow"><button class="btn small primary" data-story-listen>▶ Listen</button><button class="btn small" data-stop>Stop</button><button class="btn small" data-blur>${stt.blur ? "Show text" : "Blur text"}</button></div>` : ""}
+   <div>${s.p.map(p => `<div class="para" data-reveal><span class="es">${esc(p[0])}</span><span class="en" hidden>${esc(p[1])}</span></div>`).join("")}</div></section>
+  <section class="card"><h3>Words</h3><div class="vocab">${s.g.map(g => `<div><b>${esc(g[0])}</b><span>${esc(g[1])}</span></div>`).join("")}</div>
+   <button class="btn small" data-story-cards ${stt.added ? "disabled" : ""}>${stt.added ? "Added to your cards" : "Add these words to my cards"}</button></section>
+  <section class="card"><h3>Did you understand?</h3><div>${qs}</div></section>`;
+}
+
+function vProgress() {
+  const h = S.hours, max = 1600, next = HOUR_MARKS.find(m => h < m[0]);
+  return `<section class="card"><h2>Your roadmap</h2><p class="note">A phase counts as reached when 80% of its lessons are done. Lessons tick themselves; tick milestones yourself.</p></section>` +
+  PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length;
+    return `<section class="card"><div class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h3>${p.name}</h3><div class="note">${p.when} · ${d}/${p.lessons.length} lessons</div></div></div><p>${esc(p.goal)}</p>
+    <div>${p.milestones.map(([id, t, sub]) => { const ms = t.startsWith("★"); return `<label class="check" for="m-${id}"><input type="checkbox" id="m-${id}" data-ms="${id}" ${S.done[id] ? "checked" : ""}><span><span class="${ms ? "ms" : ""}">${esc(ms ? t.slice(1) : t)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</span></label>`; }).join("")}</div></section>`; }).join("") +
+  `<section class="card"><h2>Listening hours</h2>
+    <div class="hours-big">${(Math.round(h * 4) / 4).toLocaleString()}<small>hours of German heard</small></div>
+    <div class="ladder" aria-hidden="true"><div class="track"></div><div class="fill" style="width:${Math.min(100, h / max * 100)}%"></div>${HOUR_MARKS.map(([v, l]) => `<div class="mk ${h >= v ? "hit" : ""}" style="left:${v / max * 100}%">${v}<br>${l}</div>`).join("")}</div>
+    <p class="note">${next ? `${(next[0] - h).toLocaleString(undefined, { maximumFractionDigits: 2 })} h to the ${next[1]} mark.` : "Past 1,600 hours."} Count time spent following series, videos and podcasts.</p>
+    <div class="btnrow"><button class="btn primary small" data-add="0.25">+15 min</button><button class="btn primary small" data-add="0.5">+30 min</button><button class="btn primary small" data-add="1">+1 h</button><button class="btn small" data-add="-0.25">−15 min</button></div></section>
+  <section class="card"><h2>Series ladder</h2><p class="note">Move up a tier when you follow 70–80% without pausing. Watching needs internet; everything else in this app works offline.</p>
+   ${SERIES.map(t => `<details><summary>${t.tier} · ${t.lvl} <span class="subs">${t.subs}</span></summary><div>${t.shows.map(s => `<div class="show"><span class="n">${esc(s[0])}</span><span class="w">${esc(s[1])}</span><p>${esc(s[2])}</p></div>`).join("")}</div></details>`).join("")}</section>
+  <section class="card"><h2>Voice</h2>
+   <p class="note">${!synth ? "This browser can't read text aloud." : deVoice ? "Using the German voice: " + esc(deVoice.name) + "." : "No German voice found. On Android, open Settings → System → Languages → Text-to-speech, and download German (Deutsch) for offline use."}</p>
+   ${synth ? `<div class="btnrow"><span class="note">Speed</span><span class="seg" role="group" aria-label="Speech speed">${[[0.7, "Slow"], [0.9, "Normal"], [1.05, "Fast"]].map(([r, l]) => `<button data-rate="${r}" aria-pressed="${(ui.rate || 0.9) === r}">${l}</button>`).join("")}</span>${listenBtn("data-test-voice", "Test")}</div>` : ""}</section>
+  <section class="card"><h2>Backup</h2><p class="note">Your progress lives only on this phone. Save a backup file now and then, especially before clearing browser data or changing phones.</p>
+   <div class="btnrow"><button class="btn" data-export>Save backup file</button><label class="btn" for="importFile">Restore from file</label><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="note" id="backupMsg"></p></section>
+  <button class="reset" id="resetBtn">Reset all progress</button><div id="resetConfirm" hidden class="btnrow"><span class="note">Clear lessons, cards, ticks and hours?</span><button class="btn small" id="resetYes">Yes, reset</button><button class="btn small" id="resetNo">Cancel</button></div>`;
+}
+
+function render() {
+  header();
+  const v = { today: vToday, lessons: vLessons, cards: vCards, speak: vSpeak, read: vRead, progress: vProgress }[ui.view] || vToday;
+  $("view").innerHTML = v();
+}
+function go(v) { ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
+
+/* ---------------- actions ---------------- */
+function startReview() { const due = shuffle(dueCards()).slice(0, 60); if (!due.length) return; review = { queue: due.map(x => ({ deck: x.deck, i: x.i })), shown: false, count: 0, again: new Set() }; ui.view = "cards"; saveUI(); render(); window.scrollTo(0, 0); }
+function addCards(deckId, title, items) {
+  const t = today(), d = decks[deckId] || { title, cards: [] }, have = new Set(d.cards.map(c => norm(c.de)));
+  for (const [de, en, exs] of items) if (de && !have.has(norm(de))) { d.cards.push({ de, en: en || "", ex: exs || "", b: 0, d: t }); have.add(norm(de)); }
+  decks[deckId] = d; saveDecks();
+}
+function finishLesson(id) {
+  const L = LESSONS[id], st = ex[id] || {}, ok = Object.values(st).filter(x => x.ok).length;
+  S.done[id] = true; S.scores[id] = Math.round(100 * ok / L.e.length);
+  addCards(id, BYID[id].title, L.v); logAct("l");
+  ui.lesson = null; ui.view = "today"; saveUI(); render(); window.scrollTo(0, 0);
+}
+function checkWrite(i) {
+  const id = ui.lesson, e = LESSONS[id].e[i], box = $("w-" + i); const given = (box && box.value || "").trim(); if (!given) return;
+  const sim = similarity(given, [e[2], ...(e[3] || [])]);
+  (ex[id] || (ex[id] = {}))[i] = { given, ok: sim >= 0.9, close: sim >= 0.9 && sim < 1 };
+  render();
+}
+function drillCheck(skip) {
+  const D = DRILLS.find(x => x.id === ui.drill), t = D.turns[drill.step];
+  const given = skip ? "—" : (($("drillBox") || {}).value || "").trim(); if (!given) return;
+  const sim = skip ? 0 : similarity(given, [t[3], ...(t[4] || [])]);
+  drill.pending = { given, grade: sim >= 0.85 ? "good" : sim >= 0.6 ? "close" : "miss" };
+  render();
+  if (canSpeak() && drill.pending.grade !== "good") { /* let them hear the model */ }
+}
+function exportBackup() {
+  const data = { app: "weg-ins-deutsche", version: 1, saved: new Date().toISOString(), progress: S, decks, storyState };
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "deutsch-backup-" + today() + ".json";
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  const m = $("backupMsg"); if (m) m.textContent = "Backup saved to your Downloads folder.";
+}
+function importBackup(file) {
+  const r = new FileReader();
+  r.onload = () => { const m = $("backupMsg");
+    try { const d = JSON.parse(r.result); if (d.app !== "weg-ins-deutsche" || !d.progress) throw 0;
+      S = Object.assign({ done: {}, hours: 0, days: {}, scores: {} }, d.progress); decks = d.decks || {}; storyState = d.storyState || {};
+      saveS(); saveDecks(); put("storyState", storyState); render(); const m2 = $("backupMsg"); if (m2) m2.textContent = "Backup restored.";
+    } catch (e) { if (m) m.textContent = "That file isn't a backup from this app."; } };
+  r.readAsText(file);
+}
+
+/* ---------------- events ---------------- */
+$("nav").addEventListener("click", e => { const b = e.target.closest("[data-nav]"); if (!b) return; if (b.dataset.nav === ui.view) { ui.lesson = null; ui.story = null; ui.drill = null; drill = null; } go(b.dataset.nav); });
+$("view").addEventListener("click", e => {
+  const t = e.target.closest("button,[data-reveal]") || e.target, d = t.dataset || {};
+  if (d.navGo) return go(d.navGo);
+  if (d.startReview !== undefined) return startReview();
+  if (d.openLesson) { ui.view = "lessons"; ui.lesson = d.openLesson; saveUI(); render(); return window.scrollTo(0, 0); }
+  if (d.back !== undefined) { ui.lesson = null; saveUI(); return render(); }
+  if (d.reveal !== undefined) { const en = t.querySelector(".en"); if (en) en.hidden = !en.hidden; return; }
+  if (d.choice) { const [i, j] = d.choice.split(":").map(Number), e2 = LESSONS[ui.lesson].e[i]; (ex[ui.lesson] || (ex[ui.lesson] = {}))[i] = { given: j, ok: j === e2[3] }; return render(); }
+  if (d.write !== undefined) return checkWrite(+d.write);
+  if (d.override !== undefined) { const s = ex[ui.lesson][+d.override]; s.ok = true; s.close = false; return render(); }
+  if (d.finish) return finishLesson(d.finish);
+  if (d.speakEx !== undefined) return speak(LESSONS[ui.lesson].x.map(x => x[0]));
+  if (d.speakDlg !== undefined) return speak(LESSONS[ui.lesson].d.map(x => x[1]));
+  if (d.stop !== undefined) return stopSpeak();
+  /* cards */
+  if (d.show !== undefined) { review.shown = true; return render(); }
+  if (d.speakCard !== undefined) { const c = review.queue[0]; return speak(decks[c.deck].cards[c.i].de); }
+  if (d.grade !== undefined) { const g = +d.grade, cur = review.queue.shift(), c = decks[cur.deck].cards[cur.i];
+    if (g === 0) { c.b = 0; c.d = today(); const k = cur.deck + "|" + cur.i; if (!review.again.has(k)) { review.again.add(k); review.queue.push(cur); } }
+    else { c.b = Math.min(7, (c.b || 0) + g); c.d = addDays(INT[c.b]); }
+    review.count++; review.shown = false; saveDecks(); return render(); }
+  if (d.endReview !== undefined) { if (review.count) logAct("c"); review = null; return render(); }
+  if (d.dir) { ui.dir = d.dir; saveUI(); return render(); }
+  if (d.addCard !== undefined) { const de = $("newDe").value.trim(), en = $("newEn").value.trim(); if (!de || !en) return; addCards("mine", "My own cards", [[de, en, ""]]); return render(); }
+  /* speak */
+  if (d.openDrill) { ui.view = "speak"; ui.drill = d.openDrill; drill = null; saveUI(); render(); return window.scrollTo(0, 0); }
+  if (d.drillBack !== undefined) { ui.drill = null; drill = null; saveUI(); return render(); }
+  if (d.drillTr !== undefined) { const el = $("drillTr"); if (el) el.hidden = !el.hidden; return; }
+  if (d.sayLine !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); return speak(D.turns[drill.step][0]); }
+  if (d.sayModel !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); return speak(D.turns[drill.step][3]); }
+  if (d.drillCheck !== undefined) return drillCheck(false);
+  if (d.drillSkip !== undefined) return drillCheck(true);
+  if (d.drillRight !== undefined) { drill.pending.grade = "good"; return render(); }
+  if (d.drillNext !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); drill.results[drill.step] = drill.pending; drill.pending = null; drill.step++;
+    if (drill.step >= D.turns.length) { S.done[D.id] = true; logAct("t"); }
+    render(); const b = $("drillBox"); if (b) b.focus(); return; }
+  if (d.drillRestart !== undefined) { drill = null; return render(); }
+  /* read */
+  if (d.openStory) { ui.view = "read"; ui.story = d.openStory; saveUI(); render(); return window.scrollTo(0, 0); }
+  if (d.storyBack !== undefined) { stopSpeak(); ui.story = null; saveUI(); return render(); }
+  if (d.storyListen !== undefined) { const s = STORIES.find(x => x.id === ui.story); speak(s.p.map(p => p[0])); return logAct("r"); }
+  if (d.blur !== undefined) { const st = storyState[ui.story]; st.blur = !st.blur; put("storyState", storyState); return render(); }
+  if (d.sq) { const [i, j] = d.sq.split(":").map(Number), s = STORIES.find(x => x.id === ui.story), st = storyState[s.id]; st.answers[i] = j; put("storyState", storyState);
+    if (Object.keys(st.answers).length >= s.q.length) { S.done[s.id] = true; logAct("r"); } return render(); }
+  if (d.storyCards !== undefined) { const s = STORIES.find(x => x.id === ui.story); addCards(s.id, "Story: " + s.title, s.g.map(g => [g[0], g[1], ""])); storyState[s.id].added = true; put("storyState", storyState); return render(); }
+  /* today / progress */
+  if (d.watch !== undefined) { S.hours = Math.round((S.hours + 0.5) * 4) / 4; logAct("w"); return render(); }
+  if (d.add) { S.hours = Math.max(0, Math.round((S.hours + parseFloat(d.add)) * 4) / 4); saveS(); return render(); }
+  if (d.rate) { ui.rate = parseFloat(d.rate); put("rate", ui.rate); return render(); }
+  if (d.testVoice !== undefined) return speak("Hallo! Schön, dass du Deutsch lernst.");
+  if (d.export !== undefined) return exportBackup();
+  if (t.id === "resetBtn") { $("resetConfirm").hidden = false; return; }
+  if (t.id === "resetNo") { $("resetConfirm").hidden = true; return; }
+  if (t.id === "resetYes") { S = { done: {}, hours: 0, days: {}, scores: {} }; decks = {}; storyState = {}; review = null; saveS(); saveDecks(); put("storyState", storyState); return render(); }
+});
+$("view").addEventListener("change", e => {
+  const id = e.target.dataset && e.target.dataset.ms;
+  if (id) { if (e.target.checked) S.done[id] = true; else delete S.done[id]; saveS(); return header(); }
+  if (e.target.id === "importFile" && e.target.files[0]) importBackup(e.target.files[0]);
+});
+$("view").addEventListener("keydown", e => {
+  if (e.key !== "Enter" || e.shiftKey) return;
+  if (e.target.id && e.target.id.startsWith("w-")) { e.preventDefault(); checkWrite(+e.target.id.slice(2)); }
+  if (e.target.id === "drillBox") { e.preventDefault(); drillCheck(false); }
+});
+
+ui.rate = get("rate", 0.9);
+render();
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
