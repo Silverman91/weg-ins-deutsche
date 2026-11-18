@@ -37,6 +37,13 @@ const PHASES=[
    ["a2-10","Travelling in Germany","Deutsche Bahn, platforms and delays, asking directions, hotels; the imperative for du and Sie"]],
   milestones:[["p2l","★Talk about your weekend out loud for 2 minutes","Do the 'Your weekend' role-play first, then record yourself."],
               ["p2m","★Have a 15-minute conversation with a real person",""]]},
+ {id:"pch",lvl:"Chat",extra:true,name:"Chatting online",when:"Any time after A2",goal:"Chat with Germans in apps and messengers: casual style, abbreviations, reactions and making plans.",
+  lessons:[
+   ["ch-1","Chat basics and abbreviations","how Germans write in chats: du, lower case, short forms (hab, grad, ne), abbreviations LG, VG, HDL, kA, vllt, iwie, bzw, gn8"],
+   ["ch-2","Keeping a chat going","reactions (Echt?, Krass!, Ach so!, Stimmt!), asking back, replying late politely, voice messages"],
+   ["ch-3","Language exchange and making plans","finding a tandem partner, asking for corrections and meanings, making plans: Hast du Lust auf…?, Passt!, Sag Bescheid!"]],
+  milestones:[["pch-m1","★Send your first message to a language partner","Try Tandem, HelloTalk, a Discord server or r/German."],
+              ["pch-m2","★Keep a chat going with a German speaker for a week","Ask them to send you voice messages too."]]},
  {id:"p3",lvl:"B1",name:"Conversation",when:"Months 8–13",goal:"Hold a 30-minute conversation and give opinions, wishes and advice.",
   lessons:[
    ["b1-01","Adjective endings (complete)","all adjective endings including dative and genitive, and with no article"],

@@ -2,7 +2,7 @@
 (function () {
 "use strict";
 const LESSONS = window.LESSONS || {}, STORIES = window.STORIES || [], DRILLS = window.DRILLS || [];
-const ALL = PHASES.flatMap(p => p.lessons.map((l, i) => ({ id: l[0], title: l[1], focus: l[2], lvl: p.lvl === "A0" ? "A1" : p.lvl, phase: p.id, n: i + 1 })));
+const ALL = PHASES.flatMap(p => p.lessons.map((l, i) => ({ id: l[0], title: l[1], focus: l[2], lvl: p.lvl === "A0" ? "A1" : p.extra ? "A2" : p.lvl, phase: p.id, n: i + 1 })));
 const BYID = Object.fromEntries(ALL.map(l => [l.id, l]));
 const INT = [0, 1, 3, 7, 14, 30, 60, 120];
 
@@ -30,7 +30,7 @@ function lev(a, b) { const m = a.length, n = b.length; if (!m) return n; if (!n)
   for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[n]; }
 function similarity(given, answers) { const g = norm(given); let best = 0; for (const a of answers) { const t = norm(a); if (!t) continue; const s = 1 - lev(g, t) / Math.max(g.length, t.length); if (s > best) best = s; } return best; }
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-function level() { let l = "A0"; for (const p of PHASES) { const d = p.lessons.filter(x => S.done[x[0]]).length; if (d / p.lessons.length >= .8) l = p.lvl; else break; } return l; }
+function level() { let l = "A0"; for (const p of PHASES) { if (p.extra) continue; const d = p.lessons.filter(x => S.done[x[0]]).length; if (d / p.lessons.length >= .8) l = p.lvl; else break; } return l; }
 function workLevel() { const i = ["A0", "A1", "A2", "B1", "B2", "C1"].indexOf(level()); return ["A1", "A2", "B1", "B2", "C1"][Math.min(4, Math.max(0, i))]; }
 const nextLesson = () => ALL.find(l => !S.done[l.id]);
 const allCards = () => Object.entries(decks).flatMap(([id, d]) => (d.cards || []).map((c, i) => ({ deck: id, i, c })));

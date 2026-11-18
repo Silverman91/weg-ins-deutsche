@@ -1,6 +1,6 @@
 // Offline cache for Weg ins Deutsche. The version changes whenever the app files change.
-const CACHE = "wid-3ec80e3bfd";
-const FILES = ["./","index.html","course.js","lessons-1.js","lessons-2.js","lessons-3.js","lessons-4.js","lessons-5.js","content.js","app.js","manifest.webmanifest","icon-192.png","icon-512.png"];
+const CACHE = "wid-d46997738f";
+const FILES = ["./","index.html","course.js","lessons-1.js","lessons-2.js","lessons-3.js","lessons-4.js","lessons-5.js","lessons-6.js","content.js","app.js","manifest.webmanifest","icon-192.png","icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {
