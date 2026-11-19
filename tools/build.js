@@ -132,6 +132,7 @@ const html = `<!doctype html>
 <script src="lessons-4.js"></script>
 <script src="lessons-5.js"></script>
 <script src="lessons-6.js"></script>
+<script src="lessons-7.js"></script>
 <script src="content.js"></script>
 <script src="games.js"></script>
 <script src="glosses.js"></script>
@@ -143,7 +144,7 @@ const html = `<!doctype html>
 fs.writeFileSync(path.join(out, "index.html"), html);
 
 // 3) manifest and service worker
-const files = ["./", "index.html", "course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js", "content.js", "games.js", "glosses.js", "core-words.js", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const files = ["./", "index.html", "course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js", "lessons-7.js", "content.js", "games.js", "glosses.js", "core-words.js", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 fs.writeFileSync(path.join(out, "manifest.webmanifest"), JSON.stringify({
   name: "Weg ins Deutsche", short_name: "Deutsch", description: "Learn German offline, from zero to C1.",
   start_url: "./", scope: "./", display: "standalone", orientation: "portrait",

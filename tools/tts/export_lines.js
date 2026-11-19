@@ -16,7 +16,7 @@ const ctx = {
   fetch: () => Promise.reject(new Error("offline")), Audio: function () { return el(); },
 };
 ctx.window = ctx; vm.createContext(ctx);
-for (const f of ["course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js", "content.js", "app.js"])
+for (const f of ["course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js", "lessons-7.js", "content.js", "app.js"])
   vm.runInContext(fs.readFileSync(path.join(appDir, f), "utf8"), ctx, { filename: f });
 const build = ctx.WID_buildLesson, ids = vm.runInContext("PHASES", ctx).flatMap(p => p.lessons.map(l => l[0]));
 const hash = s => { let h = 2166136261; for (const ch of s) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8, "0"); };

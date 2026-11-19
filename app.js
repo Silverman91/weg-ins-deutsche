@@ -75,11 +75,11 @@ const stopSpeak = () => { if (P.on) return; seqGen++; audioEl.pause(); if (synth
 const canSpeak = () => !!synth || !!CLIPS;
 
 /* ---------------- lesson narration: podcast / car mode ---------------- */
-const DE_W = new Set("ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit".split(" "));
+const DE_W = new Set("können müssen wollen dürfen sollen mögen gegen durch ohne bis ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit".split(" "));
 const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not her his him and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
 // Pieces of a "German" line that are really English (table labels, quiz options, notes in brackets) go to the
 // English voice. Words that exist in both languages never count as English on their own.
-const EN_X = new Set([...EN_W, ..."hello hi bye example second song lyrics nonsense cheers hurry sausage surprised let's go eat who who'd thought obviously ironic oh great love best wishes idea maybe right now ticket bavaria northern germany switzerland agree disagree weigh up conclude give opinion regret request thanks sign-off sign off introduce yourself offer help encouraging come surprise shared knowledge resignation reassurance actually changing topic female male doctor wants looking forward article resigned person nom acc dat gen active modal passive adj version replace sounds style nominal verbal they're you're that's couldn't have no had must may might shall want need know think get make take see look find tell ask work feel try leave call keep let begin show hear play run move live believe bring happen lose pay meet learn understand watch follow stop speak read allow add spend grow open walk win offer remember like would sounds nothing something literally superlative comparative phrase official masc fem neut austria haha".split(" ")]);
+const EN_X = new Set([...EN_W, ..."hello hi bye example second song lyrics nonsense cheers hurry sausage surprised let's go eat who who'd thought obviously ironic oh great love best wishes idea maybe right now ticket bavaria northern germany switzerland agree disagree weigh up conclude give opinion regret request thanks sign-off sign off introduce yourself offer help encouraging come surprise shared knowledge resignation reassurance actually changing topic female male doctor wants looking forward article resigned person nom acc dat gen active modal passive adj version replace sounds style nominal verbal they're you're that's couldn't have no had must may might shall want need know think get make take see look find tell ask work feel try leave call keep let begin show hear play run move live believe bring happen lose pay meet learn understand watch follow stop speak read allow add spend grow open walk win offer remember like would sounds nothing something literally superlative comparative phrase official masc fem neut austria haha long short place manner reason month season clock date part meaning done".split(" ")]);
 const EN_AMBIG = new Set("in an so was die man will war bin hat also a i am um her bad position hi oh person version modal nominal verbal ticket".split(" "));
 function splitDe(text) {
   // isEn: could be English (incl. words both languages share); strong: only English
@@ -94,6 +94,7 @@ function splitDe(text) {
     if (!lw.length) return push(out.length ? out[out.length - 1].lang : "de", pc + sep);
     const nS = lw.filter(strong).length, nDe = lw.filter(w => !isEn(w)).length;
     if (!/[äöüßÄÖÜ]/.test(pc) && nS && nS >= nDe && (strong(lw[0]) || strong(lw[lw.length - 1]))) return push("en", pc + sep);
+    if (/^\([^()]*\)[\s,;:.]*$/.test(pc) && !/[äöüßÄÖÜ]/.test(pc) && lw.every(w => engVocab().has(w) && !EN_AMBIG.has(w) && !DE_W.has(w))) return push("en", pc + sep); // (state), (flower bed)
     // a leading or trailing run of English words: "After der, die, das", "… in nominal style:"
     let a = 0; while (a < lw.length && isEn(lw[a])) a++;
     while (a > 0 && EN_AMBIG.has(lw[a - 1])) a--;
@@ -130,6 +131,7 @@ function deRuns(text) {
   const kind = m => { const w = m[0], l = w.toLowerCase(), i = m.index;
     if (t[i - 1] === "-" || t[i + w.length] === "-" || /^\d+$/.test(w) || w.length === 1) return "A";
     if (EN_AMBIG.has(l) || eng.has(l)) return eng.has(l) && !EN_AMBIG.has(l) ? "E" : "A";
+    if (/ing$/.test(l) && l.length > 4 && !DE_W.has(l)) return "E";
     return /[äöüß]/.test(l) || lex.has(l) || DE_W.has(l) ? "G" : "E"; };
   const k = toks.map(kind), out = [], push = (lang, s) => { if (s) out.push({ lang, s }); };
   let pos = 0, i = 0;
@@ -181,7 +183,7 @@ function speakable(lang, text) {
   const bare = t.replace(/[.,:;!?]+$/, "");
   if (/^-[a-zäöüß]+-?$/i.test(bare)) return ["en", "the ending " + bare.replace(/-/g, "").toUpperCase().split("").join(" ")];
   if (/^[a-zäöüß]+-$/.test(bare)) return ["de", bare.slice(0, -1)];                       // a stem like "lern-"
-  if (/^[a-zäöüß]{1,4}$/.test(bare) && !germanLexicon().has(bare)) return ["en", bare.toUpperCase().split("").join(" ")];
+  if (/^[a-zäöüß]{1,4}$/.test(bare) && !germanLexicon().has(bare) && !DE_W.has(bare)) return ["en", bare.toUpperCase().split("").join(" ")];
   // an English word, e.g. quiz option "silent" (German spellings like sch/ei/ie/z/tz/pf keep it German: "siebzig")
   if (/^[a-z]{5,}$/.test(bare) && !germanLexicon().has(bare) && !/(sch|ei|ie|eu|z|pf)/.test(bare)) return ["en", t];
   return ["de", t];
@@ -207,7 +209,7 @@ function buildLesson(id) {
   else {
     L.i.split(/\n\n+/).forEach(p => sayMixed(p, "en", 600));
     if (L.t) { sayMixed("Here's a summary: " + L.t.c + ".", "en", 400);
-      L.t.r.forEach(r => { const segs = []; r.forEach(c => { const lang = detect(c, "de"), l = segs[segs.length - 1]; if (l && l.lang === lang) l.text += ", " + c; else segs.push({ lang, text: c }); });
+      L.t.r.forEach(r => { const segs = []; r.forEach(c => { const lang = c === "I" ? "en" : detect(c, "de"), l = segs[segs.length - 1]; if (l && l.lang === lang) l.text += ", " + c; else segs.push({ lang, text: c }); });
         segs.forEach((s, i) => say(s.lang, s.text.replace(/ \/ /g, ", "), i === segs.length - 1 ? 700 : 250)); }); }
   }
   say("en", "Now some examples. Listen, then repeat.", 500);
@@ -268,7 +270,6 @@ function germanLexicon() {
   for (const L of Object.values(LESSONS)) {
     L.x.forEach(x => add(x[0])); L.d.forEach(d => add(d[1])); L.v.forEach(v => { add(cleanWord(v[0])); add(v[2]); });
     if (L.t && L !== LESSONS["a0-1"]) L.t.r.forEach(r => r.slice(1).forEach(c => { if (noEnglish(c) && !/\(/.test(c)) add(c); })); // table cells, not row labels
-    if (L.t && L !== LESSONS["a0-1"]) L.t.h.slice(1).forEach(c => { if (noEnglish(c) && !/\(/.test(c)) add(c); });
     L.e.forEach(e => { if (e[0] === "w") { add(e[2]); (e[3] || []).forEach(add); }
       else if (/___/.test(e[1]) && noEnglish(e[1])) { add(e[1]); e[2].forEach(add); } });              // answers, gap options
   }
@@ -283,7 +284,7 @@ window.WID_lexicon = () => germanLexicon(); // used by the audio export to check
 function sayTitle(title, say) {
   const lex = germanLexicon(), runs = [], AMBIG = new Set(["die", "war", "an", "in", "so", "was", "café"]);
   const toks = String(title).split(/\s+/), key = t => t.toLowerCase().replace(/[^a-zäöüßé]/g, "");
-  const firm = toks.map(t => { const w = key(t); return AMBIG.has(w) ? null : (w && (lex.has(w) || /[äöüß]/.test(w)) ? "de" : "en"); });
+  const firm = toks.map(t => { const w = key(t); return AMBIG.has(w) ? null : EN_X.has(w) && !EN_AMBIG.has(w) ? "en" : (w && (lex.has(w) || /[äöüß]/.test(w)) ? "de" : "en"); });
   toks.forEach((tok, i) => {
     // an ambiguous word (die, war, an…) takes the language of its nearest clear neighbour
     let lang = firm[i];
