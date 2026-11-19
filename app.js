@@ -79,7 +79,7 @@ const DE_W = new Set("ich du er sie es wir ihr der die das den dem des ein eine 
 const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not her his him and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
 // Pieces of a "German" line that are really English (table labels, quiz options, notes in brackets) go to the
 // English voice. Words that exist in both languages never count as English on their own.
-const EN_X = new Set([...EN_W, ..."hello hi bye example second song lyrics nonsense cheers hurry sausage surprised let's go eat who who'd thought obviously ironic oh great love best wishes idea maybe right now ticket bavaria northern germany switzerland agree disagree weigh up conclude give opinion regret request thanks sign-off sign off introduce yourself offer help encouraging come surprise shared knowledge resignation reassurance actually changing topic female male doctor wants looking forward article resigned person nom acc dat gen active modal passive adj version replace sounds style nominal verbal they're you're that's couldn't have no had".split(" ")]);
+const EN_X = new Set([...EN_W, ..."hello hi bye example second song lyrics nonsense cheers hurry sausage surprised let's go eat who who'd thought obviously ironic oh great love best wishes idea maybe right now ticket bavaria northern germany switzerland agree disagree weigh up conclude give opinion regret request thanks sign-off sign off introduce yourself offer help encouraging come surprise shared knowledge resignation reassurance actually changing topic female male doctor wants looking forward article resigned person nom acc dat gen active modal passive adj version replace sounds style nominal verbal they're you're that's couldn't have no had must may might shall want need know think get make take see look find tell ask work feel try leave call keep let begin show hear play run move live believe bring happen lose pay meet learn understand watch follow stop speak read allow add spend grow open walk win offer remember like would sounds nothing something literally superlative comparative phrase official masc fem neut austria haha".split(" ")]);
 const EN_AMBIG = new Set("in an so was die man will war bin hat also a i am um her bad position hi oh person version modal nominal verbal ticket".split(" "));
 function splitDe(text) {
   // isEn: could be English (incl. words both languages share); strong: only English
@@ -112,14 +112,52 @@ function detect(t, fb) {
   for (const w of s.toLowerCase().match(/[a-zäöüß']+/g) || []) { if (DE_W.has(w)) de++; if (EN_W.has(w)) en++; }
   return de > en ? "de" : en > de ? "en" : fb;
 }
+// English words the course itself uses (all translations and glosses): such a word is never treated as German.
+let ENGV = null;
+function engVocab() {
+  if (ENGV) return ENGV;
+  ENGV = new Set(EN_X); const add = t => (String(t || "").toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) || []).forEach(w => ENGV.add(w));
+  for (const L of Object.values(LESSONS)) { L.x.forEach(x => add(x[1])); L.d.forEach(d => add(d[2])); L.v.forEach(v => add(v[1])); }
+  (window.STORIES || []).forEach(st => { st.p.forEach(p => add(p[1])); st.g.forEach(g => add(g[1])); });
+  (window.DRILLS || []).forEach(d => d.turns.forEach(t => { add(t[1]); add(t[2]); }));
+  for (const w of DE_W) if (!EN_X.has(w)) ENGV.delete(w); // ich, das, mit, und… quoted in translations are still German
+  return ENGV;
+}
+// Unmarked German inside English text ("Guten Morgen is used in the morning", "Learn eins, zwei, drei"): runs of German
+// words, joined only by spaces, commas or dashes, go to the German voice. Endings (-zehn) and single letters stay English.
+function deRuns(text) {
+  const t = String(text), toks = [...t.matchAll(/[A-Za-zÄÖÜäöüß]+(?:'[A-Za-z]+)?|\d+/g)], lex = germanLexicon(), eng = engVocab();
+  const kind = m => { const w = m[0], l = w.toLowerCase(), i = m.index;
+    if (t[i - 1] === "-" || t[i + w.length] === "-" || /^\d+$/.test(w) || w.length === 1) return "A";
+    if (EN_AMBIG.has(l) || eng.has(l)) return eng.has(l) && !EN_AMBIG.has(l) ? "E" : "A";
+    return /[äöüß]/.test(l) || lex.has(l) || DE_W.has(l) ? "G" : "E"; };
+  const k = toks.map(kind), out = [], push = (lang, s) => { if (s) out.push({ lang, s }); };
+  let pos = 0, i = 0;
+  while (i < toks.length) {
+    if (k[i] === "E") { i++; continue; }
+    let j = i; while (j + 1 < toks.length && k[j + 1] !== "E" && /^[\s,–-]*$/.test(t.slice(toks[j].index + toks[j][0].length, toks[j + 1].index))) j++;
+    let a = i, b = j; while (a <= b && k[a] === "A") a++; while (b >= a && k[b] === "A") b--;
+    if (a <= b) { const st = toks[a].index; let en = toks[b].index + toks[b][0].length; const pm = /^[.!?]/.exec(t.slice(en)); if (pm && b === j) en += 1;
+      push("en", t.slice(pos, st)); push("de", t.slice(st, en)); pos = en; }
+    i = j + 1;
+  }
+  push("en", t.slice(pos));
+  return out;
+}
 function mixed(text, base) {
-  const out = [], push = (s, lang) => { s = String(s).replace(/_{2,}/g, "…").replace(/[*]/g, "").trim(); if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) return;
+  // bold inside a word (du f**ä**hrst) marks the whole word
+  text = String(text).replace(/([A-Za-zÄÖÜäöüß]*)\*\*([^*\n]+?)\*\*([A-Za-zÄÖÜäöüß]*)/g, (m, a, b, c) => (a || c) ? "**" + a + b + c + "**" : m);
+  const out = [], push0 = (s, lang) => { s = String(s).replace(/_{2,}/g, "…").replace(/[*]/g, "").trim();
+    if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) { const l = out[out.length - 1]; if (l && /^[,;.!?…]+$/.test(s) && !/[,;.!?…]$/.test(l.text)) l.text += s; return; } // keep list commas
     const last = out[out.length - 1]; if (last && last.lang === lang && !(lang === "de" && /[.!?]$/.test(last.text))) last.text += " " + s; else out.push({ lang, text: s }); };
+  const push = (s, lang) => { if (lang !== "en") return push0(s, lang); deRuns(s).forEach(p => push0(p.s, p.lang)); };
   const re = /\*\*(.+?)\*\*|(^|[\s(„“])'([^'\n]{1,60})'(?=[\s.,;:!?)]|$)/g; let last = 0, m;
   while ((m = re.exec(String(text)))) { const start = m.index + (m[1] ? 0 : (m[2] || "").length); push(text.slice(last, start), base);
     const c = m[1] || m[3];
     // **bold** is usually German; a 'quoted' word in English text stays English unless it's German vocabulary
     let lang = m[1] ? detect(c, "de") : (quotedIsGerman(c) ? "de" : detect(c, "en"));
+    const cw = c.toLowerCase().match(/[a-zäöüß]+(?:'[a-z]+)?/g) || [];
+    if (m[1] && cw.length && cw.every(w => EN_X.has(w) && !EN_AMBIG.has(w))) lang = "en"; // **must**, **can**: bold English
     if (lang === "de" && /^[a-z]{5,}$/i.test(c.trim()) && !germanLexicon().has(c.trim().toLowerCase())) lang = "en"; // e.g. **silent**
     push(c, lang);
     last = re.lastIndex; }
@@ -230,6 +268,7 @@ function germanLexicon() {
   for (const L of Object.values(LESSONS)) {
     L.x.forEach(x => add(x[0])); L.d.forEach(d => add(d[1])); L.v.forEach(v => { add(cleanWord(v[0])); add(v[2]); });
     if (L.t && L !== LESSONS["a0-1"]) L.t.r.forEach(r => r.slice(1).forEach(c => { if (noEnglish(c) && !/\(/.test(c)) add(c); })); // table cells, not row labels
+    if (L.t && L !== LESSONS["a0-1"]) L.t.h.slice(1).forEach(c => { if (noEnglish(c) && !/\(/.test(c)) add(c); });
     L.e.forEach(e => { if (e[0] === "w") { add(e[2]); (e[3] || []).forEach(add); }
       else if (/___/.test(e[1]) && noEnglish(e[1])) { add(e[1]); e[2].forEach(add); } });              // answers, gap options
   }
@@ -457,6 +496,14 @@ function vCards() {
     <div class="btnrow"><button class="btn primary" data-start-review ${due.length ? "" : "disabled"}>${due.length ? "Review " + Math.min(due.length, 60) + (due.length === 1 ? " card" : " cards") : "Nothing due"}</button>
     <span class="seg" role="group" aria-label="Direction"><button data-dir="de" aria-pressed="${ui.dir === "de"}">DE → EN</button><button data-dir="en" aria-pressed="${ui.dir === "en"}">EN → DE</button></span></div>
     <p class="note">Cards you know come back less often: tomorrow, then in 3 days, a week, two weeks, a month. Say the answer out loud before you tap Show answer.</p></section>
+  ${CORE.length ? (() => { const pos = get("corePos", 0), auto = get("coreAuto", false), n = corePerDay();
+    return `<section class="card"><h3>Core 2,000 words</h3>
+    <p class="note">The ${CORE.length.toLocaleString()} most common words of everyday German, most frequent first, with articles, plurals and irregular forms. Words you already have from lessons are skipped. ${pos ? `You're at word ${pos.toLocaleString()} of ${CORE.length.toLocaleString()}.` : ""}</p>
+    <div class="pbar"><i style="width:${Math.round(100 * pos / CORE.length)}%"></i></div>
+    <div class="btnrow"><span class="seg" role="group" aria-label="New words per day">${[5, 10, 20].map(k => `<button data-core-n="${k}" aria-pressed="${n === k}">${k} a day</button>`).join("")}</span>
+    <button class="btn" data-core-add ${pos >= CORE.length ? "disabled" : ""}>Add ${n} now</button></div>
+    ${coreMsg ? `<p class="note"><b>${esc(coreMsg)}</b></p>` : ""}
+    <label class="note carauto"><input type="checkbox" id="coreAuto" ${auto ? "checked" : ""}> Add ${n} new words automatically each day</label></section>`; })() : ""}
   <section class="card"><h3>Add your own card</h3>
     <div class="btnrow"><input class="field" style="flex:1 1 140px;min-width:0" id="newDe" placeholder="Deutsch" autocomplete="off"><input class="field" style="flex:1 1 140px;min-width:0" id="newEn" placeholder="English" autocomplete="off"><button class="btn" data-add-card>Add</button></div></section>
   ${all.length ? `<section class="card"><h3>Your decks</h3><div>${Object.entries(decks).map(([k, d]) => `<div class="show"><span class="n">${esc(d.title || k)}</span><span class="w">${(d.cards || []).length} cards</span></div>`).join("")}</div></section>` : `<p class="note">Finish a lesson and its new words appear here.</p>`}`;
@@ -599,10 +646,21 @@ function gameEnd() {
   G.running = false; G.result = { score: G.score, total: G.items.length, best: best && G.score > 0, missed: [...new Set(G.missed)] };
   render(); window.scrollTo(0, 0);
 }
-function go(v) { G.running = false; G.result = null; ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
+function go(v) { coreMsg = ""; G.running = false; G.result = null; ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
 
 /* ---------------- actions ---------------- */
 function startReview() { const due = shuffle(dueCards()).slice(0, 60); if (!due.length) return; review = { queue: due.map(x => ({ deck: x.deck, i: x.i })), shown: false, count: 0, again: new Set() }; ui.view = "cards"; saveUI(); render(); window.scrollTo(0, 0); }
+// Core 2,000 frequency deck: new words are fed in a few at a time, skipping ones already in another deck.
+const CORE = window.CORE_WORDS || [];
+const corePerDay = () => get("corePerDay", 10);
+let coreMsg = "";
+function addCoreWords(n) {
+  const have = new Set(allCards().map(x => norm(cleanWord(x.c.de)))), items = [];
+  let pos = get("corePos", 0);
+  while (pos < CORE.length && items.length < n) { const w = CORE[pos++]; if (!have.has(norm(cleanWord(w[0])))) items.push([w[0], w[1], w[2] || ""]); }
+  put("corePos", pos); if (items.length) addCards("core", "Core 2,000 words", items);
+  return items.length;
+}
 function addCards(deckId, title, items) {
   const t = today(), d = decks[deckId] || { title, cards: [] }, have = new Set(d.cards.map(c => norm(c.de)));
   for (const [de, en, exs] of items) if (de && !have.has(norm(de))) { d.cards.push({ de, en: en || "", ex: exs || "", b: 0, d: t }); have.add(norm(de)); }
@@ -669,6 +727,8 @@ $("view").addEventListener("click", e => {
   if (d.gameQuit !== undefined) { G.running = false; G.result = null; stopSpeak(); return render(); }
   if (d.gameBack !== undefined) { G.result = null; return render(); }
   if (d.startReview !== undefined) return startReview();
+  if (d.coreN) { put("corePerDay", +d.coreN); return render(); }
+  if (d.coreAdd !== undefined) { const k = addCoreWords(corePerDay()); put("coreDay", today()); coreMsg = k ? `${k} new word${k === 1 ? "" : "s"} added. They're due now.` : "No new words left."; return render(); }
   if (d.openLesson) { ui.view = "lessons"; ui.lesson = d.openLesson; saveUI(); render(); return window.scrollTo(0, 0); }
   if (d.back !== undefined) { ui.lesson = null; saveUI(); return render(); }
   if (d.reveal !== undefined) { const en = t.querySelector(".en"); if (en) en.hidden = !en.hidden; return; }
@@ -725,6 +785,7 @@ $("view").addEventListener("click", e => {
   if (t.id === "resetYes") { S = { done: {}, hours: 0, days: {}, scores: {} }; decks = {}; storyState = {}; review = null; saveS(); saveDecks(); put("storyState", storyState); return render(); }
 });
 $("view").addEventListener("change", e => {
+  if (e.target.id === "coreAuto") { put("coreAuto", e.target.checked); if (e.target.checked && get("coreDay", "") !== today()) { addCoreWords(corePerDay()); put("coreDay", today()); } return render(); }
   const id = e.target.dataset && e.target.dataset.ms;
   if (id) { if (e.target.checked) S.done[id] = true; else delete S.done[id]; saveS(); return header(); }
   if (e.target.id === "importFile" && e.target.files[0]) importBackup(e.target.files[0]);
@@ -736,6 +797,7 @@ $("view").addEventListener("keydown", e => {
 });
 
 ui.rate = get("rate", 0.9);
+if (get("coreAuto", false) && get("coreDay", "") !== today()) { addCoreWords(corePerDay()); put("coreDay", today()); }
 P.rep = !!get("rep", false);
 $("player").addEventListener("click", playerClick);
 $("car").addEventListener("click", playerClick);
