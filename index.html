@@ -230,6 +230,39 @@ body.has-player main .wrap{padding-bottom:calc(170px + env(safe-area-inset-botto
 .carctrl .pbtn{width:84px;height:84px;font-size:34px;border-radius:50%;background:var(--tile-soft)}
 .carctrl .pbtn.main{width:112px;height:112px;font-size:44px;background:var(--tile);color:var(--surface)}
 .carauto{display:flex;gap:8px;align-items:center}
+nav.bottom .wrap{grid-template-columns:repeat(7,1fr)}
+nav.bottom button{font-size:10px}
+/* games */
+.g-icon{font-size:28px;width:44px;height:44px;display:grid;place-items:center;flex:none}
+.g-card.locked{opacity:.65}
+.g-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.g-score{font-family:var(--f-mono);font-size:14px}
+.g-prog{height:6px;border-radius:6px;background:var(--tile-soft);overflow:hidden}
+.g-prog i{display:block;height:100%;background:var(--saffron);transition:width .3s}
+.g-stage{display:grid;gap:14px;min-height:340px;align-content:start}
+.g-arena{position:relative;height:300px;border-radius:14px;background:var(--surface);border:1px solid var(--line);overflow:hidden}
+.g-fall{position:absolute;left:50%;top:0;transform:translateX(-50%);text-align:center;display:grid;gap:2px;animation-name:gfall;animation-timing-function:linear;animation-fill-mode:forwards}
+.g-fall b{font-size:30px;font-family:var(--f-display)}
+.g-fall small{color:var(--muted)}
+@keyframes gfall{from{top:0}to{top:calc(100% - 64px)}}
+.g-arts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.g-art{min-height:64px;border-radius:14px;border:2px solid var(--line);background:var(--surface);font-size:22px;font-weight:700;cursor:pointer}
+.g-der{color:#2d6cdf}.g-die{color:#d6336c}.g-das{color:#2f9e44}
+.g-art.right{background:var(--ok-soft);border-color:var(--ok)}.g-art.wrong{background:var(--bad-soft);border-color:var(--bad)}
+.g-hint{color:var(--muted);font-style:italic}
+.g-line{min-height:64px;border:2px dashed var(--line);border-radius:12px;padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.g-line.right{border-color:var(--ok);background:var(--ok-soft)}.g-line.wrong{border-color:var(--bad);background:var(--bad-soft)}
+.g-bank{display:flex;flex-wrap:wrap;gap:8px}
+.g-tile{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:17px;cursor:pointer;min-height:44px}
+.g-tile.in{background:var(--tile-soft);border-color:var(--tile)}
+.g-end{font-size:20px;font-weight:700}
+.g-listen{display:grid;justify-items:center;gap:8px;padding:12px}
+.g-play{width:96px;height:96px;border-radius:50%;border:0;background:var(--tile);color:var(--surface);font-size:40px;cursor:pointer}
+.g-word{font-size:26px;font-family:var(--f-display)}
+.g-q{font-size:20px;line-height:1.4}
+.g-blank{background:var(--saffron-soft);padding:0 6px;border-radius:6px}
+.g-result h2{font-size:40px}
+@media (prefers-reduced-motion: reduce){.g-fall{animation-timing-function:steps(4)}}
 </style>
 </head>
 <body>
@@ -254,6 +287,7 @@ body.has-player main .wrap{padding-bottom:calc(170px + env(safe-area-inset-botto
 <script src="lessons-5.js"></script>
 <script src="lessons-6.js"></script>
 <script src="content.js"></script>
+<script src="games.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

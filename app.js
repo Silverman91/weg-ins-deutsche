@@ -47,16 +47,36 @@ function pickVoice() { if (!synth) return; const vs = synth.getVoices();
   deVoice = vs.find(v => /^de(-|_)DE/i.test(v.lang) && v.localService) || vs.find(v => /^de/i.test(v.lang)) || null;
   enVoice = vs.find(v => /^en(-|_)(GB|US)/i.test(v.lang) && v.localService) || vs.find(v => /^en/i.test(v.lang)) || null; }
 if (synth) { pickVoice(); synth.onvoiceschanged = () => { pickVoice(); if (ui.view === "progress") render(); }; }
-function speak(lines, rate) {
-  if (!synth) return; if (P.on) playerPause(); synth.cancel();
-  (Array.isArray(lines) ? lines : [lines]).filter(Boolean).forEach(t => { const u = new SpeechSynthesisUtterance(String(t)); u.lang = "de-DE"; if (deVoice) u.voice = deVoice; u.rate = rate || ui.rate || 0.9; synth.speak(u); });
+/* ---------------- recorded clips: natural voices generated on a PC and shipped in audio/ ---------------- */
+// A clip's file name is a hash of language, speaker and exact text, so the app and the generator agree.
+const clipHash = (lang, alt, text) => { let h = 2166136261; for (const ch of `${lang}|${alt ? 1 : 0}|${text}`) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8, "0"); };
+let CLIPS = null, AUDINFO = null;
+fetch("audio/index.json").then(r => (r.ok ? r.json() : null)).then(d => { if (d && d.clips) { CLIPS = new Set(d.clips); AUDINFO = d; render(); } }).catch(() => {});
+const clipUrl = (lang, alt, text) => { if (!CLIPS) return null; const h = clipHash(lang, alt, String(text)); return CLIPS.has(h) ? "audio/c/" + h + ".ogg" : null; };
+const audioEl = new Audio(); audioEl.preload = "auto"; try { audioEl.preservesPitch = true; } catch (e) {}
+const audioRate = () => (ui.rate || 0.9) / 0.9;
+let seqGen = 0;
+function playUrls(urls) {
+  const g = ++seqGen; if (synth) synth.cancel(); let i = 0;
+  const next = () => { if (g !== seqGen || i >= urls.length) return; audioEl.src = urls[i++]; audioEl.playbackRate = audioRate();
+    audioEl.onended = () => setTimeout(next, 600); audioEl.onerror = () => setTimeout(next, 100); audioEl.play().catch(() => {}); };
+  next();
 }
-const stopSpeak = () => { if (P.on) return; if (synth) synth.cancel(); };
-const canSpeak = () => !!synth;
+// lines: German strings, or {text, alt} for the second dialogue speaker
+function speak(lines, rate) {
+  if (P.on) playerPause();
+  const arr = (Array.isArray(lines) ? lines : [lines]).filter(Boolean).map(x => (typeof x === "string" ? { text: x, alt: false } : x));
+  const urls = arr.map(x => clipUrl("de", x.alt, x.text));
+  if (urls.length && urls.every(Boolean)) return playUrls(urls);
+  if (!synth) return; seqGen++; audioEl.pause(); synth.cancel();
+  arr.forEach(x => { const u = new SpeechSynthesisUtterance(String(x.text)); u.lang = "de-DE"; if (deVoice) u.voice = deVoice; u.rate = rate || ui.rate || 0.9; synth.speak(u); });
+}
+const stopSpeak = () => { if (P.on) return; seqGen++; audioEl.pause(); if (synth) synth.cancel(); };
+const canSpeak = () => !!synth || !!CLIPS;
 
 /* ---------------- lesson narration: podcast / car mode ---------------- */
 const DE_W = new Set("ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit".split(" "));
-const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
+const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not her his him and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
 function detect(t, fb) {
   const s = String(t); let de = /[äöüßÄÖÜ]/.test(s) ? 2 : 0, en = 0;
   for (const w of s.toLowerCase().match(/[a-zäöüß']+/g) || []) { if (DE_W.has(w)) de++; if (EN_W.has(w)) en++; }
@@ -66,16 +86,51 @@ function mixed(text, base) {
   const out = [], push = (s, lang) => { s = String(s).replace(/_{2,}/g, "…").replace(/[*]/g, "").trim(); if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) return;
     const last = out[out.length - 1]; if (last && last.lang === lang) last.text += " " + s; else out.push({ lang, text: s }); };
   const re = /\*\*(.+?)\*\*|(^|[\s(„“])'([^'\n]{1,60})'(?=[\s.,;:!?)]|$)/g; let last = 0, m;
-  while ((m = re.exec(String(text)))) { const start = m.index + (m[1] ? 0 : (m[2] || "").length); push(text.slice(last, start), base); const c = m[1] || m[3]; push(c, detect(c, "de")); last = re.lastIndex; }
+  while ((m = re.exec(String(text)))) { const start = m.index + (m[1] ? 0 : (m[2] || "").length); push(text.slice(last, start), base);
+    const c = m[1] || m[3];
+    // **bold** is usually German; a 'quoted' word in English text stays English unless it's German vocabulary
+    let lang = m[1] ? detect(c, "de") : (quotedIsGerman(c) ? "de" : detect(c, "en"));
+    if (lang === "de" && /^[a-z]{5,}$/i.test(c.trim()) && !germanLexicon().has(c.trim().toLowerCase())) lang = "en"; // e.g. **silent**
+    push(c, lang);
+    last = re.lastIndex; }
   push(String(text).slice(last), base);
   return out;
 }
 const cleanWord = w => String(w).replace(/,\s*-.*$/, "").replace(/\s*\((pl\.|m\/f|f|m)\)/g, "").replace(/ \/ /g, ", ");
+function quotedIsGerman(c) {
+  const ws = String(c).toLowerCase().match(/[a-zäöüß]+/g) || [];
+  return /[äöüß]/i.test(c) || (ws.length > 0 && ws.every(w => germanLexicon().has(w)));
+}
+// Make a segment something a voice can actually say well:
+//  - word endings and bare letters ("-st", "ie", "ts") are spelled out by the English narrator
+//  - clock times ("3:30") are read by the English narrator
+//  - "er/sie/es" becomes "er, sie, es"
+function speakable(lang, text) {
+  let t = String(text).trim();
+  if (lang !== "de") return [lang, t];
+  if (/^\d{1,2}:\d{2}$/.test(t)) return ["en", t];
+  t = t.replace(/\s*\/\s*/g, ", ");
+  const bare = t.replace(/[.,:;!?]+$/, "");
+  if (/^-[a-zäöüß]+-?$/i.test(bare)) return ["en", "the ending " + bare.replace(/-/g, "").toUpperCase().split("").join(" ")];
+  if (/^[a-zäöüß]+-$/.test(bare)) return ["de", bare.slice(0, -1)];                       // a stem like "lern-"
+  if (/^[a-zäöüß]{1,4}$/.test(bare) && !germanLexicon().has(bare)) return ["en", bare.toUpperCase().split("").join(" ")];
+  // an English word, e.g. quiz option "silent" (German spellings like sch/ei/ie/z/tz/pf keep it German: "siebzig")
+  if (/^[a-z]{5,}$/.test(bare) && !germanLexicon().has(bare) && !/(sch|ei|ie|eu|z|pf)/.test(bare)) return ["en", t];
+  return ["de", t];
+}
 function buildLesson(id) {
   const M = BYID[id], L = LESSONS[id], q = [];
-  const say = (lang, text, pause, alt) => { const t = String(text); for (const part of (t.length < 160 ? [t] : t.split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ„"'])/))) if (part.trim()) q.push({ lang, text: part.trim(), pause: 250, alt }); if (q.length) q[q.length - 1].pause = pause || 350; };
+  const say = (lang0, text0, pause, alt) => { const [lang, t] = speakable(lang0, text0);
+    // German word lists ("Name. Vater.") become separate words with a pause each: TTS mangles dotted lists,
+    // and single words can use real human recordings.
+    if (lang === "de" && /^(?:[A-Za-zÄÖÜäöüß-]+\.\s*){2,}$/.test(t.trim())) {
+      const ws = t.trim().split(/\.\s*/).filter(Boolean);
+      ws.forEach((w, k) => q.push({ lang, text: w, pause: k === ws.length - 1 ? (pause || 350) : 900, alt }));
+      return;
+    }
+    for (const part of (t.length < 160 ? [t] : t.split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ„"'])/))) if (part.trim()) q.push({ lang, text: part.trim(), pause: 250, alt }); if (q.length) q[q.length - 1].pause = pause || 350; };
   const sayMixed = (text, base, pause) => { const segs = mixed(text, base); segs.forEach((s, i) => say(s.lang, s.text, i === segs.length - 1 ? pause : 200)); };
-  say("en", "Lesson " + M.n + ".", 200); say(detect(M.title, "en"), M.title, 700);
+  say("en", "Lesson " + numWord(M.n) + ".", 200); sayTitle(M.title, say);
   if (L.ai) L.ai.forEach(([lang, text, p]) => say(lang, text, p));
   else {
     L.i.split(/\n\n+/).forEach(p => sayMixed(p, "en", 600));
@@ -95,14 +150,55 @@ function buildLesson(id) {
   if (L.tip) { say("en", "A tip.", 200); sayMixed(L.tip, "en", 800); }
   say("en", "Quick quiz. Answer out loud before you hear the answer.", 600);
   L.e.forEach((e, i) => {
-    say("en", "Question " + (i + 1) + ".", 200);
+    say("en", "Question " + numWord(i + 1) + ".", 200);
     if (e[0] === "c") { sayMixed(e[1], detect(e[1], "en"), 400); say("en", "Is it", 150);
       e[2].forEach((o, j) => { if (j === e[2].length - 1 && j) say("en", "or", 150); say(detect(o, "de"), o, 350); });
       q[q.length - 1].pause = 3500; say("en", "The answer is", 150); say(detect(e[2][e[3]], "de"), e[2][e[3]], 400); sayMixed(e[4], "en", 900); }
     else { sayMixed(e[1], "en", 4500); say("en", "Answer:", 150); say("de", e[2], 1500); }
   });
-  say("en", "That's the end of lesson " + M.n + ". Gut gemacht!", 800);
+  say("en", "That's the end of lesson " + numWord(M.n) + ".", 300); say("de", "Gut gemacht!", 800);
+  // Extra-long pauses where the voice switches between English (Emily) and German (Greta)
+  for (let i = 0; i < q.length - 1; i++) if (q[i].lang !== q[i + 1].lang) {
+    const toSentence = q[i + 1].lang === "de" && /\s/.test(q[i + 1].text.trim());
+    q[i].pause = Math.max(q[i].pause, toSentence ? 900 : 600);
+  }
   return q;
+}
+const NUMS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen".split(" ");
+const numWord = n => NUMS[n] || String(n);
+let LEX = null;
+function germanLexicon() {
+  if (LEX) return LEX;
+  LEX = new Set(DE_W);
+  const add = s => (String(s).toLowerCase().match(/[a-zäöüß]+/g) || []).forEach(w => LEX.add(w));
+  const noEnglish = s => !(String(s).toLowerCase().match(/[a-z']+/g) || []).some(w => EN_W.has(w));
+  for (const L of Object.values(LESSONS)) {
+    L.x.forEach(x => add(x[0])); L.d.forEach(d => add(d[1])); L.v.forEach(v => { add(cleanWord(v[0])); add(v[2]); });
+    if (L.t && L !== LESSONS["a0-1"]) L.t.r.forEach(r => r.slice(1).forEach(c => { if (noEnglish(c) && !/\(/.test(c)) add(c); })); // table cells, not row labels
+    L.e.forEach(e => { if (e[0] === "w") { add(e[2]); (e[3] || []).forEach(add); }
+      else if (/___/.test(e[1]) && noEnglish(e[1])) { add(e[1]); e[2].forEach(add); } });              // answers, gap options
+  }
+  (window.STORIES || []).forEach(s => { s.p.forEach(p => add(p[0])); s.g.forEach(g => add(g[0])); });
+  (window.DRILLS || []).forEach(d => d.turns.forEach(t => { add(t[0]); add(t[3]); (t[4] || []).forEach(add); }));
+  for (const w of EN_W) LEX.delete(w);
+  ["in", "an", "so", "was", "will", "also", "war", "bin", "man", "die", "hat", "art", "rate", "gift", "kind", "ge", "en", "et", "st"].forEach(w => LEX.delete(w));
+  return LEX;
+}
+window.WID_lexicon = () => germanLexicon(); // used by the audio export to check language decisions
+// Titles mix languages ("Haben and the accusative"): give each run of German words to the German voice.
+function sayTitle(title, say) {
+  const lex = germanLexicon(), runs = [], AMBIG = new Set(["die", "war", "an", "in", "so", "was", "café"]);
+  const toks = String(title).split(/\s+/), key = t => t.toLowerCase().replace(/[^a-zäöüßé]/g, "");
+  const firm = toks.map(t => { const w = key(t); return AMBIG.has(w) ? null : (w && (lex.has(w) || /[äöüß]/.test(w)) ? "de" : "en"); });
+  toks.forEach((tok, i) => {
+    // an ambiguous word (die, war, an…) takes the language of its nearest clear neighbour
+    let lang = firm[i];
+    for (let d = 1; !lang && d < toks.length; d++) lang = firm[i - d] || firm[i + d];
+    lang = lang || "en";
+    const last = runs[runs.length - 1];
+    if (last && last.lang === lang) last.text += " " + tok; else runs.push({ lang, text: tok });
+  });
+  runs.forEach((r, i) => say(r.lang, r.text, i === runs.length - 1 ? 700 : 200));
 }
 window.WID_buildLesson = buildLesson; // used to check narration scripts
 const P = { q: [], i: 0, on: false, gen: 0, id: null, auto: false, car: false, lock: null, t: null };
@@ -110,17 +206,30 @@ async function wake() { try { if ("wakeLock" in navigator && !P.lock) { P.lock =
 function unwake() { if (P.lock) P.lock.release().catch(() => {}); P.lock = null; }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && P.on) wake(); });
 function playerLoad(id, autostart) { P.q = buildLesson(id); P.i = 0; P.id = id; if (autostart) playerPlay(); else renderPlayer(); }
-function playerPlay() { if (!synth || !P.id) return; P.on = true; wake(); playerStep(); }
-function playerPause() { P.on = false; P.gen++; clearTimeout(P.t); if (synth) synth.cancel(); unwake(); renderPlayer(); }
+function playerPlay() { if (!P.id || (!synth && !CLIPS)) return; P.on = true; wake(); playerStep(); }
+function playerPause() { P.on = false; P.gen++; clearTimeout(P.t); audioEl.pause(); if (synth) synth.cancel(); unwake(); renderPlayer(); }
 function playerStep() {
-  const g = ++P.gen; clearTimeout(P.t);
-  if (synth.speaking || synth.pending) synth.cancel();
+  const g = ++P.gen; clearTimeout(P.t); seqGen++;
+  if (synth && (synth.speaking || synth.pending)) synth.cancel();
   if (P.i >= P.q.length) return playerDone();
-  const s = P.q[P.i], u = new SpeechSynthesisUtterance(s.text);
+  const s = P.q[P.i], url = clipUrl(s.lang, s.alt, s.text);
+  const after = () => { if (g !== P.gen || !P.on) return; P.t = setTimeout(() => { if (g !== P.gen || !P.on) return; P.i++; playerStep(); }, (s.pause || 350) / (url ? audioRate() : 1)); };
+  renderPlayer();
+  if (url) { // natural recorded voice
+    audioEl.src = url; audioEl.playbackRate = audioRate(); audioEl.onended = after; audioEl.onerror = after;
+    audioEl.play().catch(after); return;
+  }
+  if (!synth) return after(); // no clip and no phone voice: skip this line
+  const u = new SpeechSynthesisUtterance(s.text);
   u.lang = s.lang === "de" ? "de-DE" : "en-GB"; const v = s.lang === "de" ? deVoice : enVoice; if (v) u.voice = v;
   u.rate = (ui.rate || 0.9) * (s.lang === "de" ? 0.95 : 1.05); if (s.alt) u.pitch = 1.25;
-  u.onend = u.onerror = () => { if (g !== P.gen || !P.on) return; P.t = setTimeout(() => { if (g !== P.gen || !P.on) return; P.i++; playerStep(); }, s.pause || 350); };
-  renderPlayer(); synth.speak(u);
+  u.onend = u.onerror = after;
+  synth.speak(u);
+}
+if ("mediaSession" in navigator) { // headphone / car / lock-screen buttons
+  const ms = navigator.mediaSession;
+  try { ms.setActionHandler("play", () => playerPlay()); ms.setActionHandler("pause", () => playerPause());
+    ms.setActionHandler("nexttrack", () => playerJump(1)); ms.setActionHandler("previoustrack", () => playerJump(-1)); } catch (e) {}
 }
 function playerDone() {
   logAct("a");
@@ -135,6 +244,10 @@ function renderPlayer() {
   document.body.classList.toggle("has-player", !!P.id);
   if (!P.id) { bar.hidden = true; car.hidden = true; return; }
   const M = BYID[P.id], s = P.q[P.i] || { lang: "en", text: "" }, pct = Math.round(100 * P.i / Math.max(1, P.q.length - 1));
+  if ("mediaSession" in navigator && window.MediaMetadata) {
+    try { navigator.mediaSession.metadata = new MediaMetadata({ title: `Lesson ${M.n}: ${M.title}`, artist: "Weg ins Deutsche", artwork: [{ src: "icon-512.png", sizes: "512x512", type: "image/png" }] });
+      navigator.mediaSession.playbackState = P.on ? "playing" : "paused"; } catch (e) {}
+  }
   const ctrls = `<button class="pbtn" data-p="back" aria-label="Back">⏮</button><button class="pbtn main" data-p="toggle" aria-label="${P.on ? "Pause" : "Play"}">${P.on ? "⏸" : "▶"}</button><button class="pbtn" data-p="fwd" aria-label="Forward">⏭</button>`;
   bar.hidden = P.car; car.hidden = !P.car;
   bar.innerHTML = `<div class="wrap pwrap"><div class="pinfo"><b>🎧 Lesson ${M.n}: ${esc(M.title)}</b><span><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</span><div class="pbar"><i style="width:${pct}%"></i></div></div>
@@ -161,6 +274,7 @@ const NAV = [["today", "Today", '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6
  ["cards", "Cards", '<rect x="3" y="6" width="14" height="14" rx="2"/><path d="M7 3h12a2 2 0 0 1 2 2v12"/>'],
  ["speak", "Speak", '<path d="M4 5h16v11H9l-5 4z"/>'],
  ["read", "Read", '<path d="M2 5h7a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H2zM22 5h-7a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h8z"/>'],
+ ["games", "Play", '<path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/>'],
  ["progress", "Progress", '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>']];
 const listenBtn = (attr, label) => canSpeak() ? `<button class="btn small" ${attr}>▶ ${label || "Listen"}</button>` : "";
 
@@ -188,6 +302,9 @@ function vToday() {
    ${step(log.t, "Speak · 10 min", esc(dr.title) + " · " + dr.lvl, `<button class="btn small" data-open-drill="${dr.id}">Speak</button>`)}
    ${step(log.r, "Read & listen · 10 min", esc(st.title) + " · " + st.lvl, `<button class="btn small" data-open-story="${st.id}">Read</button>`)}
    ${step(log.w, "Watch German · any time", esc(tier.shows[0][0]) + " · " + tier.subs, `<button class="btn small" data-watch>+30 min</button>`)}
+   ${(() => { const open = GW.list().filter(g => gameInfo(g).ready); if (!open.length) return "";
+      const g = open.slice().sort((a, b) => (((S.games || {})[a.id] || {}).plays || 0) - (((S.games || {})[b.id] || {}).plays || 0))[0];
+      return step(log.g, "Play · 5 min", g.icon + " " + esc(g.name) + " · " + esc(g.skill), `<button class="btn small" data-game-start="${g.id}">Play</button>`); })()}
    ${canSpeak() ? step(log.a, "Listen · commute or car", nl ? "Lesson " + nl.n + " narrated, hands-free" : "Replay any lesson", `<button class="btn small" data-car-start>🚗 Play</button>`) : ""}
   </section>
   <div class="stats">
@@ -314,6 +431,12 @@ function vProgress() {
   <section class="card"><h2>Voice</h2>
    <p class="note">${!synth ? "This browser can't read text aloud." : deVoice ? "Using the German voice: " + esc(deVoice.name) + "." : "No German voice found. On Android, open Settings → System → Languages → Text-to-speech, and download German (Deutsch) for offline use."}</p>
    ${synth ? `<div class="btnrow"><span class="note">Speed</span><span class="seg" role="group" aria-label="Speech speed">${[[0.7, "Slow"], [0.9, "Normal"], [1.05, "Fast"]].map(([r, l]) => `<button data-rate="${r}" aria-pressed="${(ui.rate || 0.9) === r}">${l}</button>`).join("")}</span>${listenBtn("data-test-voice", "Test")}</div>` : ""}</section>
+  <section class="card"><h2>Lesson audio</h2>
+   ${CLIPS ? `<p class="note">${CLIPS.size.toLocaleString()} natural voice clips for the narrated lessons. They play from the internet and are kept on the phone once heard. To listen offline (car, plane), download them all once on Wi-Fi.</p>
+   <div class="btnrow"><button class="btn primary" data-dl-audio ${dl.on ? "disabled" : ""}>${dl.on ? "Downloading…" : "Download all lesson audio (about " + Math.max(1, Math.round(CLIPS.size * 0.012)) + " MB)"}</button></div>
+   <p class="note" id="audMsg">${esc(dl.msg)}</p>` : `<p class="note">Natural voices aren't available yet (or can't be reached offline). Lessons use your phone's voice instead.</p>`}</section>
+  <section class="card"><h2>Credits</h2><p class="note">Narration voices made with Neuphonic's open models: ${AUDINFO && AUDINFO.voices ? esc(Object.values(AUDINFO.voices).join("; ")) : "NeuTTS (Neuphonic)"}. Audio decoding: NeuCodec (Neuphonic). Speech generated on a home PC; no internet service is used while you learn.</p>
+   ${AUDINFO && AUDINFO.credits ? `<div>${AUDINFO.credits.map(c => `<div class="show"><span class="n">${esc(c.who)}</span><span class="w">${esc(c.license)}</span><p>${esc(c.what)}</p></div>`).join("")}</div>` : ""}</section>
   <section class="card"><h2>Backup</h2><p class="note">Your progress lives only on this phone. Save a backup file now and then, especially before clearing browser data or changing phones.</p>
    <div class="btnrow"><button class="btn" data-export>Save backup file</button><label class="btn" for="importFile">Restore from file</label><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="note" id="backupMsg"></p></section>
   <button class="reset" id="resetBtn">Reset all progress</button><div id="resetConfirm" hidden class="btnrow"><span class="note">Clear lessons, cards, ticks and hours?</span><button class="btn small" id="resetYes">Yes, reset</button><button class="btn small" id="resetNo">Cancel</button></div>`;
@@ -321,10 +444,71 @@ function vProgress() {
 
 function render() {
   header();
-  const v = { today: vToday, lessons: vLessons, cards: vCards, speak: vSpeak, read: vRead, progress: vProgress }[ui.view] || vToday;
+  if (ui.view === "games" && G.running) return; // never wipe a game that's being played
+  const v = { today: vToday, lessons: vLessons, cards: vCards, speak: vSpeak, read: vRead, games: vGames, progress: vProgress }[ui.view] || vToday;
   $("view").innerHTML = v();
 }
-function go(v) { ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
+
+/* ---------------- games (framework in games.js) ---------------- */
+const GW = window.WIDGames || { list: () => [] };
+const G = { running: false, game: null, items: [], i: 0, score: 0, streak: 0, missed: [], pool: [], result: null };
+const gameApi = {
+  done: () => ALL.filter(l => S.done[l.id] && LESSONS[l.id]).map(l => l.id),
+  lesson: id => LESSONS[id], meta: id => BYID[id],
+  level: () => Math.max(0, ["A0", "A1", "A2", "B1", "B2", "C1"].indexOf(level()) - 1),
+  say: t => speak(t), canSay: () => canSpeak(), cleanWord: w => cleanWord(w),
+};
+function gameInfo(g) {
+  const pool = g.pool(gameApi), unlocked = !!S.done[g.unlock], ready = unlocked && pool.length >= g.minItems;
+  const sc = (S.games || {})[g.id] || {};
+  return { pool, unlocked, ready, sc };
+}
+function markMissed(word) { // a missed word becomes due again in the flashcards
+  if (!word) return; let hit = false;
+  for (const d of Object.values(decks)) for (const c of d.cards || []) if (cleanWord(c.de) === word || c.de === word) { c.b = 0; c.d = today(); hit = true; }
+  if (hit) saveDecks();
+}
+function vGames() {
+  if (G.result) { const r = G.result, g = G.game;
+    return `<section class="card g-result"><div class="eyebrow">${g.icon} ${esc(g.name)}</div><h2>${r.score} / ${r.total}</h2>
+      <p>${r.best ? "🏆 New best score!" : "Best: " + ((S.games || {})[g.id] || {}).best + " / " + r.total}</p>
+      ${r.missed.length ? `<p class="note">These go back into your flashcards for review:</p><div class="vocab">${r.missed.map(m => `<div><b>${esc(m)}</b></div>`).join("")}</div>` : `<p class="note">No mistakes. Perfekt!</p>`}
+      <div class="btnrow"><button class="btn primary" data-game-start="${g.id}">Play again</button><button class="btn" data-game-back>All games</button></div></section>`; }
+  const done = gameApi.done().length;
+  return `<section class="card"><h2>Play</h2><p class="note">Games use only what you've learned: each finished lesson adds its words, sentences and grammar. Words you miss go back into your flashcards.</p></section>` +
+    GW.list().map(g => { const i = gameInfo(g), unl = BYID[g.unlock];
+      return `<section class="card g-card ${i.ready ? "" : "locked"}"><div class="phase-head"><span class="g-icon">${g.icon}</span><div class="t"><h3>${esc(g.name)}</h3><div class="note">${esc(g.skill)}${i.sc.best != null ? " · best " + i.sc.best : ""}</div></div>
+        ${i.ready ? `<button class="btn primary small" data-game-start="${g.id}">Play</button>` : ""}</div>
+        <p>${esc(g.blurb)}</p>
+        <p class="note">${!i.unlocked ? `🔒 Unlocks after lesson ${unl ? unl.n + ": " + esc(unl.title) : g.unlock}` : i.ready ? `${i.pool.length} puzzles from your ${done} finished lessons` : `Needs a few more finished lessons (${i.pool.length}/${g.minItems})`}</p></section>`; }).join("");
+}
+function gameStart(id) {
+  const g = GW.list().find(x => x.id === id); if (!g) return;
+  const pool = g.pool(gameApi); if (pool.length < g.minItems) return;
+  Object.assign(G, { running: true, game: g, pool, items: GW.pick(pool, Math.min(pool.length, g.round(gameApi))), i: 0, score: 0, streak: 0, missed: [], result: null });
+  ui.view = "games"; header();
+  $("view").innerHTML = `<div class="g-top"><button class="btn ghost" data-game-quit>✕ Quit</button><b>${G.game.icon} ${esc(G.game.name)}</b><span class="g-score" id="gScore"></span></div><div class="g-prog"><i id="gProg"></i></div><div class="g-stage" id="gStage"></div>`;
+  gameNext();
+}
+function gameNext() {
+  if (!G.running) return;
+  $("gScore").textContent = `${G.score} / ${G.items.length}`; $("gProg").style.width = (100 * G.i / G.items.length) + "%";
+  if (G.i >= G.items.length) return gameEnd();
+  const it = G.items[G.i];
+  G.game.play($("gStage"), it, gameApi, (ok, missedWord) => {
+    if (!G.running) return;
+    if (ok) { G.score++; G.streak++; } else { G.streak = 0; if (missedWord) { G.missed.push(missedWord); markMissed(missedWord); } }
+    G.i++; gameNext();
+  }, { streak: G.streak, pool: G.pool, index: G.i });
+}
+function gameEnd() {
+  S.games = S.games || {}; const prev = S.games[G.game.id] || { best: null, plays: 0 }, best = prev.best == null || G.score > prev.best;
+  S.games[G.game.id] = { best: best ? G.score : prev.best, plays: (prev.plays || 0) + 1, last: today() };
+  logAct("g"); saveS();
+  G.running = false; G.result = { score: G.score, total: G.items.length, best: best && G.score > 0, missed: [...new Set(G.missed)] };
+  render(); window.scrollTo(0, 0);
+}
+function go(v) { G.running = false; G.result = null; ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
 
 /* ---------------- actions ---------------- */
 function startReview() { const due = shuffle(dueCards()).slice(0, 60); if (!due.length) return; review = { queue: due.map(x => ({ deck: x.deck, i: x.i })), shown: false, count: 0, again: new Set() }; ui.view = "cards"; saveUI(); render(); window.scrollTo(0, 0); }
@@ -353,6 +537,21 @@ function drillCheck(skip) {
   render();
   if (canSpeak() && drill.pending.grade !== "good") { /* let them hear the model */ }
 }
+const dl = { on: false, msg: "" };
+async function downloadAudio() {
+  if (!CLIPS || dl.on || !("caches" in window)) return;
+  dl.on = true; dl.msg = "Checking what's already on the phone…"; render();
+  const cache = await caches.open("wid-audio"), have = new Set((await cache.keys()).map(r => new URL(r.url).pathname.split("/").pop()));
+  const todo = [...CLIPS].filter(h => !have.has(h + ".ogg")), total = todo.length; let done = 0, failed = 0;
+  const setMsg = () => { dl.msg = total ? `Downloaded ${done} of ${total}${failed ? ` (${failed} failed, try again later)` : ""}` : "All lesson audio is already on this phone."; const m = $("audMsg"); if (m) m.textContent = dl.msg; };
+  setMsg();
+  const worker = async () => { while (todo.length) { const h = todo.shift(), url = "audio/c/" + h + ".ogg";
+    try { const r = await fetch(url, { cache: "no-store" }); if (!r.ok) throw 0; await cache.put(url, r); } catch (e) { failed++; }
+    done++; if (done % 25 === 0 || !todo.length) setMsg(); } };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  dl.on = false; dl.msg = failed ? `Done, but ${failed} clips failed. Tap again on Wi-Fi to finish.` : `All ${CLIPS.size.toLocaleString()} clips are on this phone. Lessons now play offline.`;
+  render();
+}
 function exportBackup() {
   const data = { app: "weg-ins-deutsche", version: 1, saved: new Date().toISOString(), progress: S, decks, storyState };
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
@@ -375,6 +574,9 @@ $("nav").addEventListener("click", e => { const b = e.target.closest("[data-nav]
 $("view").addEventListener("click", e => {
   const t = e.target.closest("button,[data-reveal]") || e.target, d = t.dataset || {};
   if (d.navGo) return go(d.navGo);
+  if (d.gameStart) return gameStart(d.gameStart);
+  if (d.gameQuit !== undefined) { G.running = false; G.result = null; stopSpeak(); return render(); }
+  if (d.gameBack !== undefined) { G.result = null; return render(); }
   if (d.startReview !== undefined) return startReview();
   if (d.openLesson) { ui.view = "lessons"; ui.lesson = d.openLesson; saveUI(); render(); return window.scrollTo(0, 0); }
   if (d.back !== undefined) { ui.lesson = null; saveUI(); return render(); }
@@ -386,11 +588,11 @@ $("view").addEventListener("click", e => {
   if (d.listenLesson) { P.auto = false; P.car = false; return playerLoad(d.listenLesson, true); }
   if (d.carStart !== undefined) { const nl = nextLesson() || ALL[0]; P.auto = true; P.car = true; return playerLoad(nl.id, true); }
   if (d.speakEx !== undefined) return speak(LESSONS[ui.lesson].x.map(x => x[0]));
-  if (d.speakDlg !== undefined) return speak(LESSONS[ui.lesson].d.map(x => x[1]));
+  if (d.speakDlg !== undefined) { const D = LESSONS[ui.lesson].d, who = [...new Set(D.map(x => x[0]))]; return speak(D.map(x => ({ text: x[1], alt: who.indexOf(x[0]) % 2 === 1 }))); }
   if (d.stop !== undefined) return stopSpeak();
   /* cards */
   if (d.show !== undefined) { review.shown = true; return render(); }
-  if (d.speakCard !== undefined) { const c = review.queue[0]; return speak(decks[c.deck].cards[c.i].de); }
+  if (d.speakCard !== undefined) { const c = review.queue[0], w = decks[c.deck].cards[c.i].de; return speak(clipUrl("de", false, cleanWord(w)) ? cleanWord(w) : w); }
   if (d.grade !== undefined) { const g = +d.grade, cur = review.queue.shift(), c = decks[cur.deck].cards[cur.i];
     if (g === 0) { c.b = 0; c.d = today(); const k = cur.deck + "|" + cur.i; if (!review.again.has(k)) { review.again.add(k); review.queue.push(cur); } }
     else { c.b = Math.min(7, (c.b || 0) + g); c.d = addDays(INT[c.b]); }
@@ -425,6 +627,7 @@ $("view").addEventListener("click", e => {
   if (d.rate) { ui.rate = parseFloat(d.rate); put("rate", ui.rate); return render(); }
   if (d.testVoice !== undefined) return speak("Hallo! Schön, dass du Deutsch lernst.");
   if (d.export !== undefined) return exportBackup();
+  if (d.dlAudio !== undefined) return downloadAudio();
   if (t.id === "resetBtn") { $("resetConfirm").hidden = false; return; }
   if (t.id === "resetNo") { $("resetConfirm").hidden = true; return; }
   if (t.id === "resetYes") { S = { done: {}, hours: 0, days: {}, scores: {} }; decks = {}; storyState = {}; review = null; saveS(); saveDecks(); put("storyState", storyState); return render(); }

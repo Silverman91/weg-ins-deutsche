@@ -5,11 +5,11 @@ window.LESSONS = window.LESSONS || {};
 Object.assign(window.LESSONS, {
 "a0-1": {
  ai: [["en","Good news first: German is spelled very regularly. Once you know a few rules, you can read almost any word aloud. Listen, and repeat each German word out loud.",600],
-  ["en","First, the vowels. They are short and pure. A, as in father:",300],["de","a. Name. Vater.",1800],
-  ["en","E, like the a in say, but without the glide:",300],["de","e. Tee. leben.",1800],
-  ["en","I, like double e:",300],["de","i. Kino. Igel.",1800],
-  ["en","O, like in so:",300],["de","o. Rose. Boot.",1800],
-  ["en","U, like double o:",300],["de","u. gut. Blume.",1800],
+  ["en","First, the vowels. They are short and pure. A, as in father:",300],["de","Name. Vater.",1800],
+  ["en","E, like the a in say, but without the glide:",300],["de","Tee. leben.",1800],
+  ["en","I, like double e:",300],["de","Kino. Igel.",1800],
+  ["en","O, like in so:",300],["de","Rose. Boot.",1800],
+  ["en","U, like double o:",300],["de","gut. Blume.",1800],
   ["en","Now the umlauts, the vowels with two dots. Ä sounds like the e in bed:",300],["de","Käse. Mädchen.",1800],
   ["en","Ö: say e, but round your lips:",300],["de","schön. hören.",1800],
   ["en","Ü: say double e, but round your lips as if you were saying oo:",300],["de","für. müde.",1800],
