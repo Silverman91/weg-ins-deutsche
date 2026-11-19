@@ -56,9 +56,9 @@ const clipUrl = (lang, alt, text) => { if (!CLIPS) return null; const h = clipHa
 const audioEl = new Audio(); audioEl.preload = "auto"; try { audioEl.preservesPitch = true; } catch (e) {}
 const audioRate = () => (ui.rate || 0.9) / 0.9;
 let seqGen = 0;
-function playUrls(urls) {
+function playUrls(urls, rate) {
   const g = ++seqGen; if (synth) synth.cancel(); let i = 0;
-  const next = () => { if (g !== seqGen || i >= urls.length) return; audioEl.src = urls[i++]; audioEl.playbackRate = audioRate();
+  const next = () => { if (g !== seqGen || i >= urls.length) return; audioEl.src = urls[i++]; audioEl.playbackRate = rate || audioRate();
     audioEl.onended = () => setTimeout(next, 600); audioEl.onerror = () => setTimeout(next, 100); audioEl.play().catch(() => {}); };
   next();
 }
@@ -67,7 +67,7 @@ function speak(lines, rate) {
   if (P.on) playerPause();
   const arr = (Array.isArray(lines) ? lines : [lines]).filter(Boolean).map(x => (typeof x === "string" ? { text: x, alt: false } : x));
   const urls = arr.map(x => clipUrl("de", x.alt, x.text));
-  if (urls.length && urls.every(Boolean)) return playUrls(urls);
+  if (urls.length && urls.every(Boolean)) return playUrls(urls, rate && rate < 0.8 ? rate : 0);
   if (!synth) return; seqGen++; audioEl.pause(); synth.cancel();
   arr.forEach(x => { const u = new SpeechSynthesisUtterance(String(x.text)); u.lang = "de-DE"; if (deVoice) u.voice = deVoice; u.rate = rate || ui.rate || 0.9; synth.speak(u); });
 }
@@ -456,6 +456,39 @@ function soundBySound(ai) {
     : `<p>${esc(text)}</p>`).join("");
   return `<section class="card"><h3>Sound by sound</h3><p class="note">The full walk-through from the audio lesson. Tap a word to hear it, then say it yourself.</p><div class="prose">${rows}</div></section>`;
 }
+// Listening practice: 3 "what did you hear?" (examples, pick the meaning) + 2 dictations (dialogue lines),
+// chosen the same way every time for a lesson. Uses audio that the narrated lesson already has.
+let lis = {};
+function seeded(id, n) { let h = 0; for (const ch of id) h = (h * 31 + ch.codePointAt(0)) >>> 0; return () => (h = (h * 1103515245 + 12345) >>> 0) % n; }
+function listeningItems(id) {
+  const L = LESSONS[id], r = seeded(id, 1000), items = [];
+  // only sentences the narrator says in one piece have a clip of their own
+  const whole = (t, alt) => { if (alt) return true; const p = splitDe(t); return p.length === 1 && p[0].lang === "de" && p[0].text === t; };
+  const xs = L.x.map((x, i) => i).filter(i => whole(L.x[i][0], false)).sort((a, b) => ((a * 7 + id.length) % 5) - ((b * 7 + id.length) % 5)).slice(0, 3);
+  for (const i of xs) {
+    const opts = [L.x[i][1], ...L.x.filter((_, j) => j !== i).map(x => x[1])].slice(0, 4);
+    const order = opts.map((o, k) => [o, r()]).sort((a, b) => a[1] - b[1]).map(o => o[0]);
+    items.push({ kind: "choose", text: L.x[i][0], alt: false, opts: order, ans: order.indexOf(L.x[i][1]), en: L.x[i][1] });
+  }
+  const who = [...new Set(L.d.map(d => d[0]))];
+  const lines = L.d.map(d => ({ text: d[1], alt: who.indexOf(d[0]) % 2 === 1, en: d[2], n: d[1].split(/\s+/).length }))
+    .filter(d => d.n >= 3 && d.n <= 9 && whole(d.text, d.alt)).sort((a, b) => a.n - b.n);
+  const pick = lines.length > 2 ? [lines[Math.floor(lines.length / 3)], lines[Math.floor(2 * lines.length / 3)]] : lines;
+  for (const d of pick) items.push({ kind: "dictate", text: d.text, alt: d.alt, en: d.en });
+  return items;
+}
+window.WID_listening = listeningItems;
+function vListening(id) {
+  if (!canSpeak()) return "";
+  const items = listeningItems(id), st = lis[id] || {}, ok = Object.values(st).filter(x => x.ok).length;
+  const play = k => `<button class="btn small" data-lis-play="${k}">▶ Play</button><button class="btn small ghost" data-lis-slow="${k}" aria-label="Play slowly">🐢 Slow</button>`;
+  const rows = items.map((it, k) => { const s = st[k];
+    const head = `<div class="qt">${k + 1}. ${it.kind === "choose" ? "What does it mean?" : "Write what you hear."}</div><div class="btnrow">${play(k)}</div>`;
+    if (it.kind === "choose") return `<div class="q">${head}<div class="opts">${it.opts.map((o, j) => { let c = ""; if (s) { if (j === it.ans) c = "right"; else if (s.given === j) c = "wrong"; } return `<button class="opt ${c}" data-lis-choice="${k}:${j}" ${s ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}">${s.ok ? "Richtig! " : "Not quite. "}You heard: <b>${esc(it.text)}</b></div>` : ""}</div>`;
+    return `<div class="q">${head}${s ? `<div class="fb ${s.ok ? "ok" : "no"}"><b>${esc(s.given)}</b><br>${s.ok ? (s.close ? "Almost! Check the spelling: " : "Richtig! ") : "Not quite. It was: "}<b>${esc(it.text)}</b><br><span class="note">${esc(it.en)}</span></div>` :
+      `<div class="btnrow"><input class="field" style="flex:1;min-width:0" id="lis-${k}" placeholder="Schreib, was du hörst" autocomplete="off" autocapitalize="sentences" spellcheck="false"><button class="btn small primary" data-lis-write="${k}">Check</button></div>`}</div>`; }).join("");
+  return `<section class="card"><h3>Listening · ${ok}/${items.length}</h3><p class="note">No text this time: listen first, as often as you like. Slow plays it at a gentler speed.</p><div>${rows}</div></section>`;
+}
 function vLesson(id) {
   const M = BYID[id], L = LESSONS[id], st = ex[id] || {};
   const n = L.e.length, answered = Object.keys(st).length, ok = Object.values(st).filter(x => x.ok).length;
@@ -475,6 +508,7 @@ function vLesson(id) {
   <section class="card"><h3>Dialogue</h3><p class="note">Tap a line to see the English.</p><div>${L.d.map(d => `<div class="line" data-reveal><span class="who">${esc(d[0])}</span><span>${esc(d[1])}</span><span class="en" hidden>${esc(d[2])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-dlg", "Listen to the dialogue")}</div></section>
   <section class="card"><h3>New words</h3><p class="note">These go into your cards when you finish the lesson.</p><div class="vocab">${L.v.map(v => `<div><b>${esc(v[0])}</b><span>${esc(v[1])}</span></div>`).join("")}</div></section>
   ${L.tip ? `<div class="tip"><b>Tip · </b>${esc(L.tip)}</div>` : ""}
+  ${vListening(id)}
   <section class="card"><h3>Practice · ${ok}/${n}</h3><div>${exs}</div>
    <div class="btnrow"><button class="btn primary" data-finish="${id}" ${answered < n ? "disabled" : ""}>${S.done[id] ? "Finish again" : "Finish lesson"}</button>${answered < n ? `<span class="note">Answer all ${n} to finish.</span>` : ""}</div></section>`;
 }
@@ -734,6 +768,10 @@ $("view").addEventListener("click", e => {
   if (d.reveal !== undefined) { const en = t.querySelector(".en"); if (en) en.hidden = !en.hidden; return; }
   if (d.choice) { const [i, j] = d.choice.split(":").map(Number), e2 = LESSONS[ui.lesson].e[i]; (ex[ui.lesson] || (ex[ui.lesson] = {}))[i] = { given: j, ok: j === e2[3] }; return render(); }
   if (d.write !== undefined) return checkWrite(+d.write);
+  if (d.lisPlay !== undefined || d.lisSlow !== undefined) { const it = listeningItems(ui.lesson)[+(d.lisPlay ?? d.lisSlow)]; return speak([{ text: it.text, alt: it.alt }], d.lisSlow !== undefined ? 0.7 : undefined); }
+  if (d.lisChoice) { const [k, j] = d.lisChoice.split(":").map(Number), it = listeningItems(ui.lesson)[k]; (lis[ui.lesson] || (lis[ui.lesson] = {}))[k] = { given: j, ok: j === it.ans }; return render(); }
+  if (d.lisWrite !== undefined) { const k = +d.lisWrite, it = listeningItems(ui.lesson)[k], box = $("lis-" + k), given = (box && box.value || "").trim(); if (!given) return;
+    const sim = similarity(given, [it.text]); (lis[ui.lesson] || (lis[ui.lesson] = {}))[k] = { given, ok: sim >= 0.85, close: sim >= 0.85 && sim < 1 }; return render(); }
   if (d.override !== undefined) { const s = ex[ui.lesson][+d.override]; s.ok = true; s.close = false; return render(); }
   if (d.finish) return finishLesson(d.finish);
   if (d.listenLesson) { P.auto = false; P.car = false; return playerLoad(d.listenLesson, true); }
@@ -794,6 +832,7 @@ $("view").addEventListener("keydown", e => {
   if (e.key !== "Enter" || e.shiftKey) return;
   if (e.target.id && e.target.id.startsWith("w-")) { e.preventDefault(); checkWrite(+e.target.id.slice(2)); }
   if (e.target.id === "drillBox") { e.preventDefault(); drillCheck(false); }
+  if (e.target.id && e.target.id.startsWith("lis-")) { e.preventDefault(); const btn = document.querySelector(`[data-lis-write="${e.target.id.slice(4)}"]`); if (btn) btn.click(); }
 });
 
 ui.rate = get("rate", 0.9);

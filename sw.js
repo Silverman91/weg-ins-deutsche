@@ -1,5 +1,5 @@
 // Offline cache for Weg ins Deutsche. The version changes whenever the app files change.
-const CACHE = "wid-d8f4bd22ec";
+const CACHE = "wid-1735731278";
 const FILES = ["./","index.html","course.js","lessons-1.js","lessons-2.js","lessons-3.js","lessons-4.js","lessons-5.js","lessons-6.js","content.js","games.js","glosses.js","core-words.js","app.js","manifest.webmanifest","icon-192.png","icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 // Lesson audio lives in its own cache ("wid-audio") so app updates don't delete downloaded clips.
