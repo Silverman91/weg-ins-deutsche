@@ -42,15 +42,118 @@ const lvlIdx = l => ["A1", "A2", "B1", "B2", "C1"].indexOf(l);
 
 /* ---------------- speech (device voice, works offline) ---------------- */
 const synth = window.speechSynthesis || null;
-let deVoice = null;
-function pickVoice() { if (!synth) return; const vs = synth.getVoices(); deVoice = vs.find(v => /^de(-|_)DE/i.test(v.lang) && v.localService) || vs.find(v => /^de/i.test(v.lang)) || null; }
+let deVoice = null, enVoice = null;
+function pickVoice() { if (!synth) return; const vs = synth.getVoices();
+  deVoice = vs.find(v => /^de(-|_)DE/i.test(v.lang) && v.localService) || vs.find(v => /^de/i.test(v.lang)) || null;
+  enVoice = vs.find(v => /^en(-|_)(GB|US)/i.test(v.lang) && v.localService) || vs.find(v => /^en/i.test(v.lang)) || null; }
 if (synth) { pickVoice(); synth.onvoiceschanged = () => { pickVoice(); if (ui.view === "progress") render(); }; }
 function speak(lines, rate) {
-  if (!synth) return; synth.cancel();
+  if (!synth) return; if (P.on) playerPause(); synth.cancel();
   (Array.isArray(lines) ? lines : [lines]).filter(Boolean).forEach(t => { const u = new SpeechSynthesisUtterance(String(t)); u.lang = "de-DE"; if (deVoice) u.voice = deVoice; u.rate = rate || ui.rate || 0.9; synth.speak(u); });
 }
-const stopSpeak = () => synth && synth.cancel();
+const stopSpeak = () => { if (P.on) return; if (synth) synth.cancel(); };
 const canSpeak = () => !!synth;
+
+/* ---------------- lesson narration: podcast / car mode ---------------- */
+const DE_W = new Set("ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit".split(" "));
+const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
+function detect(t, fb) {
+  const s = String(t); let de = /[äöüßÄÖÜ]/.test(s) ? 2 : 0, en = 0;
+  for (const w of s.toLowerCase().match(/[a-zäöüß']+/g) || []) { if (DE_W.has(w)) de++; if (EN_W.has(w)) en++; }
+  return de > en ? "de" : en > de ? "en" : fb;
+}
+function mixed(text, base) {
+  const out = [], push = (s, lang) => { s = String(s).replace(/_{2,}/g, "…").replace(/[*]/g, "").trim(); if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) return;
+    const last = out[out.length - 1]; if (last && last.lang === lang) last.text += " " + s; else out.push({ lang, text: s }); };
+  const re = /\*\*(.+?)\*\*|(^|[\s(„“])'([^'\n]{1,60})'(?=[\s.,;:!?)]|$)/g; let last = 0, m;
+  while ((m = re.exec(String(text)))) { const start = m.index + (m[1] ? 0 : (m[2] || "").length); push(text.slice(last, start), base); const c = m[1] || m[3]; push(c, detect(c, "de")); last = re.lastIndex; }
+  push(String(text).slice(last), base);
+  return out;
+}
+const cleanWord = w => String(w).replace(/,\s*-.*$/, "").replace(/\s*\((pl\.|m\/f|f|m)\)/g, "").replace(/ \/ /g, ", ");
+function buildLesson(id) {
+  const M = BYID[id], L = LESSONS[id], q = [];
+  const say = (lang, text, pause, alt) => { const t = String(text); for (const part of (t.length < 160 ? [t] : t.split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ„"'])/))) if (part.trim()) q.push({ lang, text: part.trim(), pause: 250, alt }); if (q.length) q[q.length - 1].pause = pause || 350; };
+  const sayMixed = (text, base, pause) => { const segs = mixed(text, base); segs.forEach((s, i) => say(s.lang, s.text, i === segs.length - 1 ? pause : 200)); };
+  say("en", "Lesson " + M.n + ".", 200); say(detect(M.title, "en"), M.title, 700);
+  if (L.ai) L.ai.forEach(([lang, text, p]) => say(lang, text, p));
+  else {
+    L.i.split(/\n\n+/).forEach(p => sayMixed(p, "en", 600));
+    if (L.t) { sayMixed("Here's a summary: " + L.t.c + ".", "en", 400);
+      L.t.r.forEach(r => { const segs = []; r.forEach(c => { const lang = detect(c, "de"), l = segs[segs.length - 1]; if (l && l.lang === lang) l.text += ", " + c; else segs.push({ lang, text: c }); });
+        segs.forEach((s, i) => say(s.lang, s.text.replace(/ \/ /g, ", "), i === segs.length - 1 ? 700 : 250)); }); }
+  }
+  say("en", "Now some examples. Listen, then repeat.", 500);
+  L.x.forEach(x => { say("de", x[0], 1800); say("en", x[1], 400); say("de", x[0], 2200); });
+  say("en", "Now a short dialogue.", 500);
+  const who = [...new Set(L.d.map(d => d[0]))];
+  L.d.forEach(d => say("de", d[1], 500, who.indexOf(d[0]) % 2 === 1));
+  say("en", "Once more, with the English.", 500);
+  L.d.forEach(d => { say("de", d[1], 300, who.indexOf(d[0]) % 2 === 1); say("en", d[2], 600); });
+  say("en", "New words. Repeat each one.", 500);
+  L.v.forEach(v => { say("de", cleanWord(v[0]), 1400); say("en", v[1], 300); say("de", v[2], 1200); });
+  if (L.tip) { say("en", "A tip.", 200); sayMixed(L.tip, "en", 800); }
+  say("en", "Quick quiz. Answer out loud before you hear the answer.", 600);
+  L.e.forEach((e, i) => {
+    say("en", "Question " + (i + 1) + ".", 200);
+    if (e[0] === "c") { sayMixed(e[1], detect(e[1], "en"), 400); say("en", "Is it", 150);
+      e[2].forEach((o, j) => { if (j === e[2].length - 1 && j) say("en", "or", 150); say(detect(o, "de"), o, 350); });
+      q[q.length - 1].pause = 3500; say("en", "The answer is", 150); say(detect(e[2][e[3]], "de"), e[2][e[3]], 400); sayMixed(e[4], "en", 900); }
+    else { sayMixed(e[1], "en", 4500); say("en", "Answer:", 150); say("de", e[2], 1500); }
+  });
+  say("en", "That's the end of lesson " + M.n + ". Gut gemacht!", 800);
+  return q;
+}
+window.WID_buildLesson = buildLesson; // used to check narration scripts
+const P = { q: [], i: 0, on: false, gen: 0, id: null, auto: false, car: false, lock: null, t: null };
+async function wake() { try { if ("wakeLock" in navigator && !P.lock) { P.lock = await navigator.wakeLock.request("screen"); P.lock.addEventListener("release", () => { P.lock = null; }); } } catch (e) {} }
+function unwake() { if (P.lock) P.lock.release().catch(() => {}); P.lock = null; }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && P.on) wake(); });
+function playerLoad(id, autostart) { P.q = buildLesson(id); P.i = 0; P.id = id; if (autostart) playerPlay(); else renderPlayer(); }
+function playerPlay() { if (!synth || !P.id) return; P.on = true; wake(); playerStep(); }
+function playerPause() { P.on = false; P.gen++; clearTimeout(P.t); if (synth) synth.cancel(); unwake(); renderPlayer(); }
+function playerStep() {
+  const g = ++P.gen; clearTimeout(P.t);
+  if (synth.speaking || synth.pending) synth.cancel();
+  if (P.i >= P.q.length) return playerDone();
+  const s = P.q[P.i], u = new SpeechSynthesisUtterance(s.text);
+  u.lang = s.lang === "de" ? "de-DE" : "en-GB"; const v = s.lang === "de" ? deVoice : enVoice; if (v) u.voice = v;
+  u.rate = (ui.rate || 0.9) * (s.lang === "de" ? 0.95 : 1.05); if (s.alt) u.pitch = 1.25;
+  u.onend = u.onerror = () => { if (g !== P.gen || !P.on) return; P.t = setTimeout(() => { if (g !== P.gen || !P.on) return; P.i++; playerStep(); }, s.pause || 350); };
+  renderPlayer(); synth.speak(u);
+}
+function playerDone() {
+  logAct("a");
+  const idx = ALL.findIndex(l => l.id === P.id), nxt = ALL[idx + 1];
+  if (P.auto && nxt) { P.q = [{ lang: "en", text: "Next up:", pause: 300 }].concat(buildLesson(nxt.id)); P.i = 0; P.id = nxt.id; return playerStep(); }
+  P.on = false; unwake(); P.i = P.q.length - 1; renderPlayer();
+}
+function playerJump(d) { P.i = Math.max(0, Math.min(P.q.length - 1, P.i + d)); if (P.on) playerStep(); else renderPlayer(); }
+function playerClose() { playerPause(); P.id = null; P.car = false; renderPlayer(); }
+function renderPlayer() {
+  const bar = $("player"), car = $("car"); if (!bar) return;
+  document.body.classList.toggle("has-player", !!P.id);
+  if (!P.id) { bar.hidden = true; car.hidden = true; return; }
+  const M = BYID[P.id], s = P.q[P.i] || { lang: "en", text: "" }, pct = Math.round(100 * P.i / Math.max(1, P.q.length - 1));
+  const ctrls = `<button class="pbtn" data-p="back" aria-label="Back">⏮</button><button class="pbtn main" data-p="toggle" aria-label="${P.on ? "Pause" : "Play"}">${P.on ? "⏸" : "▶"}</button><button class="pbtn" data-p="fwd" aria-label="Forward">⏭</button>`;
+  bar.hidden = P.car; car.hidden = !P.car;
+  bar.innerHTML = `<div class="wrap pwrap"><div class="pinfo"><b>🎧 Lesson ${M.n}: ${esc(M.title)}</b><span><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</span><div class="pbar"><i style="width:${pct}%"></i></div></div>
+    <div class="pctrl">${ctrls}<button class="pbtn" data-p="car" aria-label="Car mode">🚗</button><button class="pbtn" data-p="close" aria-label="Close">✕</button></div></div>`;
+  car.innerHTML = `<div class="carin"><div class="eyebrow">Lesson ${M.n} · ${pct}%</div><h2>${esc(M.title)}</h2>
+    <p class="cartext"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</p>
+    <div class="carctrl">${ctrls}</div>
+    <label class="note carauto"><input type="checkbox" id="pAuto" ${P.auto ? "checked" : ""}> Keep going to the next lesson</label>
+    <button class="btn" data-p="exitcar">Exit car mode</button></div>`;
+}
+function playerClick(e) {
+  const b = e.target.closest("[data-p]"); if (!b) return; const a = b.dataset.p;
+  if (a === "toggle") P.on ? playerPause() : playerPlay();
+  else if (a === "back") playerJump(-1);
+  else if (a === "fwd") playerJump(1);
+  else if (a === "car") { P.car = true; renderPlayer(); }
+  else if (a === "exitcar") { P.car = false; renderPlayer(); }
+  else if (a === "close") playerClose();
+}
 
 /* ---------------- views ---------------- */
 const NAV = [["today", "Today", '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>'],
@@ -85,6 +188,7 @@ function vToday() {
    ${step(log.t, "Speak · 10 min", esc(dr.title) + " · " + dr.lvl, `<button class="btn small" data-open-drill="${dr.id}">Speak</button>`)}
    ${step(log.r, "Read & listen · 10 min", esc(st.title) + " · " + st.lvl, `<button class="btn small" data-open-story="${st.id}">Read</button>`)}
    ${step(log.w, "Watch German · any time", esc(tier.shows[0][0]) + " · " + tier.subs, `<button class="btn small" data-watch>+30 min</button>`)}
+   ${canSpeak() ? step(log.a, "Listen · commute or car", nl ? "Lesson " + nl.n + " narrated, hands-free" : "Replay any lesson", `<button class="btn small" data-car-start>🚗 Play</button>`) : ""}
   </section>
   <div class="stats">
    <div class="stat"><b>${ALL.filter(l => S.done[l.id]).length}</b><span>lessons</span></div>
@@ -98,7 +202,8 @@ function vToday() {
 function vLessons() {
   if (ui.lesson && LESSONS[ui.lesson]) return vLesson(ui.lesson);
   const nl = nextLesson();
-  return `<p class="intro">${ALL.length} lessons from your first word to C1. Each has an explanation, examples, a dialogue, new words for your cards and 7 exercises.</p>` +
+  return `<p class="intro">${ALL.length} lessons from your first word to C1. Each has an explanation, examples, a dialogue, new words for your cards and 7 exercises.</p>
+  ${canSpeak() ? `<div class="listen-cta"><button class="btn" data-car-start>🚗 Car mode: listen from ${nl ? "lesson " + nl.n + " (" + esc(nl.title) + ")" : "the start"}</button></div>` : ""}` +
     PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length;
       return `<section class="card"><div class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h2>${p.name}</h2><div class="when">${p.when} · ${d}/${p.lessons.length} done</div></div></div>
       <div>${p.lessons.map((l, i) => { const done = S.done[l[0]], isNext = nl && nl.id === l[0];
@@ -117,6 +222,7 @@ function vLesson(id) {
       `<div class="btnrow"><input class="field" style="flex:1;min-width:0" id="w-${i}" placeholder="Schreib auf Deutsch" autocomplete="off" autocapitalize="sentences" spellcheck="false"><button class="btn small primary" data-write="${i}">Check</button></div>`}</div>`; }).join("");
   return `<button class="btn ghost back" data-back>‹ All lessons</button>
   <div class="lesson-title"><span class="badge ${S.done[id] ? "done" : ""}">${PHASES.find(p => p.id === M.phase).lvl}</span><div><div class="eyebrow">Lesson ${M.n} · ${PHASES.find(p => p.id === M.phase).name}</div><h2>${esc(M.title)}</h2></div></div>
+  ${canSpeak() ? `<div class="listen-cta"><button class="btn primary" data-listen-lesson="${id}">🎧 Listen to this lesson</button><span class="note">Narrated in English with German examples, pauses to repeat and a spoken quiz. Works in the car.</span></div>` : ""}
   <section class="card"><div class="prose">${L.i.split(/\n\n+/).map(p => `<p>${md(p)}</p>`).join("")}</div>${t}</section>
   <section class="card"><h3>Examples</h3><div>${L.x.map(e => `<div class="ex"><span class="es">${esc(e[0])}</span><span class="en">${esc(e[1])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-ex")}</div></section>
   <section class="card"><h3>Dialogue</h3><p class="note">Tap a line to see the English.</p><div>${L.d.map(d => `<div class="line" data-reveal><span class="who">${esc(d[0])}</span><span>${esc(d[1])}</span><span class="en" hidden>${esc(d[2])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-dlg", "Listen to the dialogue")}</div></section>
@@ -277,6 +383,8 @@ $("view").addEventListener("click", e => {
   if (d.write !== undefined) return checkWrite(+d.write);
   if (d.override !== undefined) { const s = ex[ui.lesson][+d.override]; s.ok = true; s.close = false; return render(); }
   if (d.finish) return finishLesson(d.finish);
+  if (d.listenLesson) { P.auto = false; P.car = false; return playerLoad(d.listenLesson, true); }
+  if (d.carStart !== undefined) { const nl = nextLesson() || ALL[0]; P.auto = true; P.car = true; return playerLoad(nl.id, true); }
   if (d.speakEx !== undefined) return speak(LESSONS[ui.lesson].x.map(x => x[0]));
   if (d.speakDlg !== undefined) return speak(LESSONS[ui.lesson].d.map(x => x[1]));
   if (d.stop !== undefined) return stopSpeak();
@@ -333,6 +441,9 @@ $("view").addEventListener("keydown", e => {
 });
 
 ui.rate = get("rate", 0.9);
+$("player").addEventListener("click", playerClick);
+$("car").addEventListener("click", playerClick);
+$("car").addEventListener("change", e => { if (e.target.id === "pAuto") P.auto = e.target.checked; });
 render();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
