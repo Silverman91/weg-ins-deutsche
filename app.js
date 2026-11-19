@@ -346,6 +346,14 @@ function vLessons() {
         return `<button class="lrow ${done ? "done" : ""} ${isNext ? "next" : ""}" data-open-lesson="${l[0]}"><span class="num">${String(i + 1).padStart(2, "0")}</span><span>${esc(l[1])}</span><span class="st">${done ? "✓ " + (S.scores[l[0]] ?? "") + "%" : isNext ? "NEXT" : "›"}</span></button>`; }).join("")}</div></section>`; }).join("");
 }
 
+// Lesson 1's narration walks through every sound with example words; show the same walk-through on the page,
+// with each example word tappable (most are real human recordings).
+function soundBySound(ai) {
+  const rows = ai.map(([lang, text]) => lang === "de"
+    ? `<div class="chips sbs">${text.split(/\.\s*/).filter(Boolean).map(w => `<button class="chip" data-say-word="${esc(w)}">▶ ${esc(w)}</button>`).join("")}</div>`
+    : `<p>${esc(text)}</p>`).join("");
+  return `<section class="card"><h3>Sound by sound</h3><p class="note">The full walk-through from the audio lesson. Tap a word to hear it, then say it yourself.</p><div class="prose">${rows}</div></section>`;
+}
 function vLesson(id) {
   const M = BYID[id], L = LESSONS[id], st = ex[id] || {};
   const n = L.e.length, answered = Object.keys(st).length, ok = Object.values(st).filter(x => x.ok).length;
@@ -360,6 +368,7 @@ function vLesson(id) {
   <div class="lesson-title"><span class="badge ${S.done[id] ? "done" : ""}">${PHASES.find(p => p.id === M.phase).lvl}</span><div><div class="eyebrow">Lesson ${M.n} · ${PHASES.find(p => p.id === M.phase).name}</div><h2>${esc(M.title)}</h2></div></div>
   ${canSpeak() ? `<div class="listen-cta"><button class="btn primary" data-listen-lesson="${id}">🎧 Listen to this lesson</button><span class="note">Narrated in English with German examples, pauses to repeat and a spoken quiz. Works in the car.</span></div>` : ""}
   <section class="card"><div class="prose">${L.i.split(/\n\n+/).map(p => `<p>${md(p)}</p>`).join("")}</div>${t}</section>
+  ${L.ai ? soundBySound(L.ai) : ""}
   <section class="card"><h3>Examples</h3><div>${L.x.map(e => `<div class="ex"><span class="es">${esc(e[0])}</span><span class="en">${esc(e[1])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-ex")}</div></section>
   <section class="card"><h3>Dialogue</h3><p class="note">Tap a line to see the English.</p><div>${L.d.map(d => `<div class="line" data-reveal><span class="who">${esc(d[0])}</span><span>${esc(d[1])}</span><span class="en" hidden>${esc(d[2])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-dlg", "Listen to the dialogue")}</div></section>
   <section class="card"><h3>New words</h3><p class="note">These go into your cards when you finish the lesson.</p><div class="vocab">${L.v.map(v => `<div><b>${esc(v[0])}</b><span>${esc(v[1])}</span></div>`).join("")}</div></section>
@@ -606,6 +615,7 @@ $("view").addEventListener("click", e => {
   if (d.finish) return finishLesson(d.finish);
   if (d.listenLesson) { P.auto = false; P.car = false; return playerLoad(d.listenLesson, true); }
   if (d.carStart !== undefined) { const nl = nextLesson() || ALL[0]; P.auto = true; P.car = true; return playerLoad(nl.id, true); }
+  if (d.sayWord !== undefined) return speak(d.sayWord);
   if (d.speakEx !== undefined) return speak(LESSONS[ui.lesson].x.map(x => x[0]));
   if (d.speakDlg !== undefined) { const D = LESSONS[ui.lesson].d, who = [...new Set(D.map(x => x[0]))]; return speak(D.map(x => ({ text: x[1], alt: who.indexOf(x[0]) % 2 === 1 }))); }
   if (d.stop !== undefined) return stopSpeak();
