@@ -440,13 +440,15 @@ function vToday() {
 
 function vLessons() {
   if (ui.lesson && LESSONS[ui.lesson]) return vLesson(ui.lesson);
+  if (ui.test && PHASES.some(p => p.id === ui.test)) return vTest(ui.test);
   const nl = nextLesson();
   return `<p class="intro">${ALL.length} lessons from your first word to C1. Each has an explanation, examples, a dialogue, new words for your cards and 7 exercises.</p>
   ${canSpeak() ? `<div class="listen-cta"><button class="btn" data-car-start>🚗 Car mode: listen from ${nl ? "lesson " + nl.n + " (" + esc(nl.title) + ")" : "the start"}</button></div>` : ""}` +
     PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length;
       return `<section class="card"><div class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h2>${p.name}</h2><div class="when">${p.when} · ${d}/${p.lessons.length} done</div></div></div>
       <div>${p.lessons.map((l, i) => { const done = S.done[l[0]], isNext = nl && nl.id === l[0];
-        return `<button class="lrow ${done ? "done" : ""} ${isNext ? "next" : ""}" data-open-lesson="${l[0]}"><span class="num">${String(i + 1).padStart(2, "0")}</span><span>${esc(l[1])}</span><span class="st">${done ? "✓ " + (S.scores[l[0]] ?? "") + "%" : isNext ? "NEXT" : "›"}</span></button>`; }).join("")}</div></section>`; }).join("");
+        return `<button class="lrow ${done ? "done" : ""} ${isNext ? "next" : ""}" data-open-lesson="${l[0]}"><span class="num">${String(i + 1).padStart(2, "0")}</span><span>${esc(l[1])}</span><span class="st">${done ? "✓ " + (S.scores[l[0]] ?? "") + "%" : isNext ? "NEXT" : "›"}</span></button>`; }).join("")}${(() => { const t = (S.tests || {})[p.id];
+        return `<button class="lrow test ${t && t.best >= 80 ? "done" : ""}" data-open-test="${p.id}"><span class="num">✎</span><span>Level test</span><span class="st">${t ? "best " + t.best + "%" : d === p.lessons.length ? "READY" : "›"}</span></button>`; })()}</div></section>`; }).join("");
 }
 
 // Lesson 1's narration walks through every sound with example words; show the same walk-through on the page,
@@ -479,6 +481,72 @@ function listeningItems(id) {
   return items;
 }
 window.WID_listening = listeningItems;
+
+/* ---------------- review questions and level tests ----------------
+   Questions are borrowed from lessons: an exercise is "lessonId~index", a listening item "L~lessonId~index".
+   Answers live in qs (this session only), like the lesson exercises. */
+let qs = {};
+const qItem = key => { const p = key.split("~");
+  return p[0] === "L" ? { lis: true, ...listeningItems(p[1])[+p[2]] } : { e: LESSONS[p[0]].e[+p[1]], from: p[0] }; };
+const qSafe = key => key.replace(/[^a-z0-9]/gi, "_");
+function qBlock(num, key, showFrom) {
+  const it = qItem(key), s = qs[key], from = showFrom && it.from ? `<span class="note"> · from “${esc(BYID[it.from].title)}”</span>` : "";
+  if (it.lis) {
+    const head = `<div class="qt">${num}. What does it mean?${from}</div><div class="btnrow"><button class="btn small" data-q-play="${key}">▶ Play</button><button class="btn small ghost" data-q-slow="${key}">🐢 Slow</button></div>`;
+    return `<div class="q">${head}<div class="opts">${it.opts.map((o, j) => { let c = ""; if (s) { if (j === it.ans) c = "right"; else if (s.given === j) c = "wrong"; } return `<button class="opt ${c}" data-q-choice="${key}|${j}" ${s ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}">${s.ok ? "Richtig! " : "Not quite. "}You heard: <b>${esc(it.text)}</b></div>` : ""}</div>`;
+  }
+  const e = it.e;
+  if (e[0] === "c") { const [, q, opts, ans, why] = e;
+    return `<div class="q"><div class="qt">${num}. ${esc(q)}${from}</div><div class="opts">${opts.map((o, j) => { let c = ""; if (s) { if (j === ans) c = "right"; else if (s.given === j) c = "wrong"; } return `<button class="opt ${c}" data-q-choice="${key}|${j}" ${s ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}">${s.ok ? "Richtig! " : "Not quite. "}${esc(why)}</div>` : ""}</div>`; }
+  const [, q, ans, , why] = e;
+  return `<div class="q"><div class="qt">${num}. ${esc(q)}${from}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}"><b>${esc(s.given)}</b><br>${s.ok ? (s.close ? "Almost! Check the spelling. " : "Richtig! ") : "Not quite. "}${esc(why)}${s.ok && !s.close ? "" : "<br>Model answer: " + esc(ans)}</div>` :
+    `<div class="btnrow"><input class="field" style="flex:1;min-width:0" id="q-${qSafe(key)}" data-q-key="${key}" placeholder="Schreib auf Deutsch" autocomplete="off" autocapitalize="sentences" spellcheck="false"><button class="btn small primary" data-q-write="${key}">Check</button></div>`}</div>`;
+}
+function qAnswer(key, given) {
+  const it = qItem(key);
+  if (typeof given === "number") qs[key] = { given, ok: given === (it.lis ? it.ans : it.e[3]) };
+  else { const sim = similarity(given, [it.e[2], ...(it.e[3] || [])]); qs[key] = { given, ok: sim >= 0.9, close: sim >= 0.9 && sim < 1 }; }
+}
+// three questions from earlier lessons: one recent, one from a while back, one older (spaced review)
+function reviewKeys(id) {
+  const idx = ALL.findIndex(l => l.id === id); if (idx < 2) return [];
+  const r = seeded(id + "review", 997), out = [];
+  for (const [a, b] of [[idx - 3, idx - 1], [idx - 8, idx - 4], [0, idx - 9]]) {
+    const lo = Math.max(0, a), hi = b; if (hi < lo) continue;
+    const src = ALL[lo + r() % (hi - lo + 1)].id; out.push(src + "~" + (r() % LESSONS[src].e.length));
+  }
+  return out;
+}
+function vReview(id) {
+  const keys = reviewKeys(id); if (!keys.length) return "";
+  const ok = keys.filter(k => qs[k] && qs[k].ok).length;
+  return `<section class="card"><h3>From earlier lessons · ${ok}/${keys.length}</h3><p class="note">Old grammar comes back now and then so it sticks.</p><div>${keys.map((k, i) => qBlock(i + 1, k, true)).join("")}</div></section>`;
+}
+// level test: 16 exercises and 4 listening questions from the whole level, a new mix each try
+function testKeys(pid) {
+  const p = PHASES.find(x => x.id === pid), tries = (S.testTry || {})[pid] || 0, r = seeded(pid + "test" + tries, 9973);
+  const ids = p.lessons.map(l => l[0]);
+  const pool = ids.flatMap(id => LESSONS[id].e.map((_, i) => id + "~" + i)).map(k => [k, r()]).sort((a, b) => a[1] - b[1]).map(x => x[0]);
+  const lis = ids.flatMap(id => listeningItems(id).map((it, i) => it.kind === "choose" ? "L~" + id + "~" + i : null).filter(Boolean)).map(k => [k, r()]).sort((a, b) => a[1] - b[1]).map(x => x[0]);
+  const keys = pool.slice(0, 16), L = lis.slice(0, 4);
+  return keys.slice(0, 4).concat(L.slice(0, 2), keys.slice(4, 12), L.slice(2), keys.slice(12));
+}
+function vTest(pid) {
+  const p = PHASES.find(x => x.id === pid), keys = testKeys(pid), answered = keys.filter(k => qs[k]).length, ok = keys.filter(k => qs[k] && qs[k].ok).length;
+  const pct = Math.round(100 * ok / keys.length), best = ((S.tests || {})[pid] || {}).best;
+  let result = "";
+  if (answered === keys.length) {
+    S.tests = S.tests || {}; const t = S.tests[pid] || {};
+    if (t.lastKey !== keys.join()) { S.tests[pid] = { best: Math.max(t.best || 0, pct), last: pct, lastKey: keys.join() }; saveS(); logAct("l"); }
+    result = `<section class="card"><h2>${pct >= 80 ? "Bestanden! You passed." : "Not yet: " + pct + "%"}</h2>
+      <p>${ok} of ${keys.length} right (${pct}%). ${pct >= 80 ? "This level is solid. Move on with confidence." : "80% is a pass. Look at the explanations above, revisit those lessons, then try a new set."}</p>
+      <div class="btnrow"><button class="btn primary" data-test-retry="${pid}">Try a new set</button><button class="btn" data-back>Back to lessons</button></div></section>`;
+  }
+  return `<button class="btn ghost back" data-back>‹ All lessons</button>
+  <div class="lesson-title"><span class="badge ${best >= 80 ? "done" : ""}">${p.lvl}</span><div><div class="eyebrow">Level test · ${esc(p.name)}</div><h2>${keys.length} questions from all ${p.lessons.length} lessons</h2></div></div>
+  <p class="note">A mix of grammar, writing and listening from the whole level. No looking back at the lessons until you finish. 80% is a pass.${best != null ? ` Your best so far: ${best}%.` : ""}</p>
+  <section class="card"><h3>Questions · ${answered}/${keys.length} answered</h3><div>${keys.map((k, i) => qBlock(i + 1, k, false)).join("")}</div></section>${result}`;
+}
 function vListening(id) {
   if (!canSpeak()) return "";
   const items = listeningItems(id), st = lis[id] || {}, ok = Object.values(st).filter(x => x.ok).length;
@@ -510,6 +578,7 @@ function vLesson(id) {
   <section class="card"><h3>New words</h3><p class="note">These go into your cards when you finish the lesson.</p><div class="vocab">${L.v.map(v => `<div><b>${esc(v[0])}</b><span>${esc(v[1])}</span></div>`).join("")}</div></section>
   ${L.tip ? `<div class="tip"><b>Tip · </b>${esc(L.tip)}</div>` : ""}
   ${vListening(id)}
+  ${vReview(id)}
   <section class="card"><h3>Practice · ${ok}/${n}</h3><div>${exs}</div>
    <div class="btnrow"><button class="btn primary" data-finish="${id}" ${answered < n ? "disabled" : ""}>${S.done[id] ? "Finish again" : "Finish lesson"}</button>${answered < n ? `<span class="note">Answer all ${n} to finish.</span>` : ""}</div></section>`;
 }
@@ -681,7 +750,7 @@ function gameEnd() {
   G.running = false; G.result = { score: G.score, total: G.items.length, best: best && G.score > 0, missed: [...new Set(G.missed)] };
   render(); window.scrollTo(0, 0);
 }
-function go(v) { coreMsg = ""; G.running = false; G.result = null; ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
+function go(v) { coreMsg = ""; if (v !== "lessons") ui.test = null; G.running = false; G.result = null; ui.view = v; if (v !== "lessons") ui.lesson = null; if (v !== "read") ui.story = null; if (v !== "speak") { ui.drill = null; drill = null; } stopSpeak(); saveUI(); render(); window.scrollTo(0, 0); }
 
 /* ---------------- actions ---------------- */
 function startReview() { const due = shuffle(dueCards()).slice(0, 60); if (!due.length) return; review = { queue: due.map(x => ({ deck: x.deck, i: x.i })), shown: false, count: 0, again: new Set() }; ui.view = "cards"; saveUI(); render(); window.scrollTo(0, 0); }
@@ -764,8 +833,13 @@ $("view").addEventListener("click", e => {
   if (d.startReview !== undefined) return startReview();
   if (d.coreN) { put("corePerDay", +d.coreN); return render(); }
   if (d.coreAdd !== undefined) { const k = addCoreWords(corePerDay()); put("coreDay", today()); coreMsg = k ? `${k} new word${k === 1 ? "" : "s"} added. They're due now.` : "No new words left."; return render(); }
-  if (d.openLesson) { ui.view = "lessons"; ui.lesson = d.openLesson; saveUI(); render(); return window.scrollTo(0, 0); }
-  if (d.back !== undefined) { ui.lesson = null; saveUI(); return render(); }
+  if (d.openLesson) { ui.view = "lessons"; ui.lesson = d.openLesson; ui.test = null; saveUI(); render(); return window.scrollTo(0, 0); }
+  if (d.openTest) { ui.view = "lessons"; ui.lesson = null; ui.test = d.openTest; saveUI(); render(); return window.scrollTo(0, 0); }
+  if (d.testRetry) { S.testTry = S.testTry || {}; S.testTry[d.testRetry] = (S.testTry[d.testRetry] || 0) + 1; saveS(); render(); return window.scrollTo(0, 0); }
+  if (d.back !== undefined) { ui.lesson = null; ui.test = null; saveUI(); return render(); }
+  if (d.qChoice) { const [key, j] = d.qChoice.split("|"); qAnswer(key, +j); return render(); }
+  if (d.qWrite) { const box = $("q-" + qSafe(d.qWrite)), given = (box && box.value || "").trim(); if (!given) return; qAnswer(d.qWrite, given); return render(); }
+  if (d.qPlay || d.qSlow) { const it = qItem(d.qPlay || d.qSlow); return speak([{ text: it.text, alt: it.alt }], d.qSlow ? 0.7 : undefined); }
   if (d.reveal !== undefined) { const en = t.querySelector(".en"); if (en) en.hidden = !en.hidden; return; }
   if (d.choice) { const [i, j] = d.choice.split(":").map(Number), e2 = LESSONS[ui.lesson].e[i]; (ex[ui.lesson] || (ex[ui.lesson] = {}))[i] = { given: j, ok: j === e2[3] }; return render(); }
   if (d.write !== undefined) return checkWrite(+d.write);
@@ -833,6 +907,7 @@ $("view").addEventListener("keydown", e => {
   if (e.key !== "Enter" || e.shiftKey) return;
   if (e.target.id && e.target.id.startsWith("w-")) { e.preventDefault(); checkWrite(+e.target.id.slice(2)); }
   if (e.target.id === "drillBox") { e.preventDefault(); drillCheck(false); }
+  if (e.target.dataset && e.target.dataset.qKey) { e.preventDefault(); const k = e.target.dataset.qKey, given = e.target.value.trim(); if (given) { qAnswer(k, given); render(); } return; }
   if (e.target.id && e.target.id.startsWith("lis-")) { e.preventDefault(); const btn = document.querySelector(`[data-lis-write="${e.target.id.slice(4)}"]`); if (btn) btn.click(); }
 });
 
