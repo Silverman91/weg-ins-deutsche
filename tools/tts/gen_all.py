@@ -1,6 +1,7 @@
 """Generate all lesson narration clips for the offline German app.
 
 Input:  lines.json (from export_lines.js) - every unique segment the app's narrator speaks.
+Usage: gen_all.py [--core]   (--core also makes AI clips for Core 2,000 card words)
 Output: german-offline/audio/c/<hash>.ogg + german-offline/audio/index.json (which clips exist).
 Voices: English = Emily (neutts-2e); German = Greta (neutts-nano-german); the second dialogue speaker
         (alt) = the German model cloning Emily. Single German words: best of several takes (words.py).
@@ -54,7 +55,8 @@ def main():
     items = json.loads((ROOT / "lines.json").read_text(encoding="utf-8"))["items"]
     real = ROOT / "ll_exact.json"   # segments that get a real human recording (apply_ll.py) need no TTS
     real = set(json.loads(real.read_text(encoding="utf-8"))) if real.exists() else set()
-    todo = [i for i in items if not out_path(i).exists() and i["h"] not in real]
+    core = "--core" in sys.argv   # Core 2,000 card words: only when asked (they get real recordings first)
+    todo = [i for i in items if not out_path(i).exists() and i["h"] not in real and (core or not i.get("core"))]
     print(f"{len(items)} clips, {len(todo)} to make ({len(real)} come from real recordings)", flush=True)
     de = [i for i in todo if i["lang"] == "de"]
     en = [i for i in todo if i["lang"] == "en"]

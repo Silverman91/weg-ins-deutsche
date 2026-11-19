@@ -21,10 +21,12 @@ for it in items:
     k = key(it["text"])
     if len(k.split()) > 4:
         continue
-    for sp in pref:
-        t = rec[sp].get(k)
-        if t:
-            hits[it["h"]] = {"text": it["text"], "speaker": sp, "file": t}
+    # card words (Core 2,000) may also use a recording of the noun without its article: "der Mann" -> "Mann"
+    keys = [k] + ([re.sub(r"^(der|die|das) ", "", k)] if it.get("core") and re.match(r"^(der|die|das) ", k) else [])
+    for kk in keys:
+        sp = next((sp for sp in pref if rec[sp].get(kk)), None)
+        if sp:
+            hits[it["h"]] = {"text": it["text"], "speaker": sp, "file": rec[sp][kk]}
             by[sp] = by.get(sp, 0) + 1
             break
 (ROOT / "ll_exact.json").write_text(json.dumps(hits, ensure_ascii=False, indent=0), encoding="utf-8")
