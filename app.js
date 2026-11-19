@@ -164,6 +164,27 @@ function buildLesson(id) {
   }
   return q;
 }
+// English meaning of a German line, for car mode and the lines list: from vocab, examples, dialogues, story
+// glossaries and chat drills, plus lesson glosses (L.gl) for words that only appear in narration.
+let GLOSS = null;
+const glossKey = t => String(t).trim().replace(/[.!?,:;…]+$/, "").toLowerCase();
+function gloss(text) {
+  if (!GLOSS) {
+    GLOSS = new Map(); const add = (de, en) => { const k = glossKey(de); if (k && en && !GLOSS.has(k)) GLOSS.set(k, en); };
+    Object.entries(window.GLOSS_EXTRA || {}).forEach(([de, en]) => add(de, en));
+    for (const L of Object.values(LESSONS)) {
+      Object.entries(L.gl || {}).forEach(([de, en]) => add(de, en));
+      L.v.forEach(v => { add(cleanWord(v[0]), v[1]); add(v[0], v[1]); });
+      L.x.forEach(x => add(x[0], x[1])); L.d.forEach(d => add(d[1], d[2]));
+      L.e.forEach(e => { if (e[0] === "w") add(e[2], e[1].replace(/^(Translate|Say|Write)[^:]*:\s*/i, "")); });
+    }
+    (window.STORIES || []).forEach(st => { st.g.forEach(g => add(g[0], g[1])); st.p.forEach(p => add(p[0], p[1])); });
+    (window.DRILLS || []).forEach(d => d.turns.forEach(t => add(t[0], t[1])));
+    for (const [k, en] of [...GLOSS]) { const bare = k.replace(/^(der|die|das) /, ""); if (bare !== k && !GLOSS.has(bare)) GLOSS.set(bare, en); }
+  }
+  return GLOSS.get(glossKey(text)) || "";
+}
+window.WID_gloss = gloss;
 const NUMS = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen".split(" ");
 const numWord = n => NUMS[n] || String(n);
 let LEX = null;
@@ -259,7 +280,7 @@ function renderPlayer() {
   bar.innerHTML = `<div class="wrap pwrap"><div class="pinfo"><b>🎧 Lesson ${M.n}: ${esc(M.title)}</b><span><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</span><div class="pbar"><i style="width:${pct}%"></i></div></div>
     <div class="pctrl">${ctrls}<button class="pbtn" data-p="list" aria-label="All lines">☰</button><button class="pbtn" data-p="car" aria-label="Car mode">🚗</button><button class="pbtn" data-p="close" aria-label="Close">✕</button></div></div>`;
   car.innerHTML = `<div class="carin"><div class="eyebrow">Lesson ${M.n} · ${pct}%</div><h2>${esc(M.title)}</h2>
-    <p class="cartext"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</p>
+    <div class="cartext"><p><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</p>${s.lang === "de" && gloss(s.text) ? `<p class="gloss">${esc(gloss(s.text))}</p>` : ""}</div>
     <div class="carctrl">${ctrls}</div>
     <button class="btn" data-p="list">☰ All lines: jump to any part</button>
     ${repBtn()}
@@ -273,7 +294,7 @@ function renderPlayerList() {
   if (car.dataset.list !== P.id + "|" + P.q.length) {
     car.dataset.list = P.id + "|" + P.q.length;
     car.innerHTML = `<div class="plist"><div class="plhead"><b>Lesson ${M.n}: ${esc(M.title)}</b><button class="btn small" data-p="closelist">Done</button></div>
-      <ol class="pllines">${P.q.map((s, i) => `<li data-p="goto" data-i="${i}" class="${s.lang}"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</li>`).join("")}</ol>
+      <ol class="pllines">${P.q.map((s, i) => `<li data-p="goto" data-i="${i}" class="${s.lang}"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}${s.lang === "de" && gloss(s.text) ? `<span class="gloss">${esc(gloss(s.text))}</span>` : ""}</li>`).join("")}</ol>
       <div class="plrep"></div><div class="carctrl plctrl"></div></div>`;
   }
   car.querySelector(".plrep").innerHTML = repBtn();
