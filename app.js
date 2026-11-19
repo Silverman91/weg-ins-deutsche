@@ -77,6 +77,36 @@ const canSpeak = () => !!synth || !!CLIPS;
 /* ---------------- lesson narration: podcast / car mode ---------------- */
 const DE_W = new Set("ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit".split(" "));
 const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not her his him and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
+// Pieces of a "German" line that are really English (table labels, quiz options, notes in brackets) go to the
+// English voice. Words that exist in both languages never count as English on their own.
+const EN_X = new Set([...EN_W, ..."hello hi bye example second song lyrics nonsense cheers hurry sausage surprised let's go eat who who'd thought obviously ironic oh great love best wishes idea maybe right now ticket bavaria northern germany switzerland agree disagree weigh up conclude give opinion regret request thanks sign-off sign off introduce yourself offer help encouraging come surprise shared knowledge resignation reassurance actually changing topic female male doctor wants looking forward article resigned person nom acc dat gen active modal passive adj version replace sounds style nominal verbal they're you're that's couldn't have no had".split(" ")]);
+const EN_AMBIG = new Set("in an so was die man will war bin hat also a i am um her bad position hi oh person version modal nominal verbal ticket".split(" "));
+function splitDe(text) {
+  // isEn: could be English (incl. words both languages share); strong: only English
+  const strong = w => !EN_AMBIG.has(w) && EN_X.has(w), isEn = w => EN_AMBIG.has(w) || strong(w);
+  const out = [], push = (lang, t) => { if (!/[A-Za-zÄÖÜäöüß0-9]/.test(t)) { if (out.length) out[out.length - 1].text += t; return; }
+    const l = out[out.length - 1]; if (l && l.lang === lang) l.text += t; else out.push({ lang, text: t }); };
+  const pieces = String(text).replace(/\s+(means…|means\.\.\.|in (?:nominal|verbal) style)/g, " ⟂$1").split(/(?<=[,;])\s+|\s+(?=\()|(?<=\))\s*|\s⟂/);
+  pieces.forEach((pc, i) => {
+    const sep = i < pieces.length - 1 ? " " : "";
+    const words = [...pc.matchAll(/[A-Za-zÄÖÜäöüß]+(?:'[A-Za-z]+)?/g)];
+    const lw = words.map(m => m[0].toLowerCase());
+    if (!lw.length) return push(out.length ? out[out.length - 1].lang : "de", pc + sep);
+    const nS = lw.filter(strong).length, nDe = lw.filter(w => !isEn(w)).length;
+    if (!/[äöüßÄÖÜ]/.test(pc) && nS && nS >= nDe && (strong(lw[0]) || strong(lw[lw.length - 1]))) return push("en", pc + sep);
+    // a leading or trailing run of English words: "After der, die, das", "… in nominal style:"
+    let a = 0; while (a < lw.length && isEn(lw[a])) a++;
+    while (a > 0 && EN_AMBIG.has(lw[a - 1])) a--;
+    let b = lw.length; while (b > a && isEn(lw[b - 1])) b--;
+    while (b < lw.length && EN_AMBIG.has(lw[b])) b++;
+    const lead = a > 0 && lw.slice(0, a).some(strong) && a < lw.length, trail = b < lw.length && lw.slice(b).some(strong) && b > 0;
+    const cut1 = lead ? words[a].index : 0, cut2 = trail ? words[b].index : pc.length;
+    if (lead) push("en", pc.slice(0, cut1));
+    push("de", pc.slice(cut1, cut2) + (trail ? " " : sep));
+    if (trail) push("en", pc.slice(cut2) + sep);
+  });
+  return out.map(p => ({ lang: p.lang, text: p.lang === "en" ? p.text.replace(/[()]/g, "").replace(/^[,;\s]+|[,;\s]+$/g, "").trim() : p.text.replace(/[,;\s]+$/, "").trim() })).filter(p => p.text);
+}
 function detect(t, fb) {
   const s = String(t); let de = /[äöüßÄÖÜ]/.test(s) ? 2 : 0, en = 0;
   for (const w of s.toLowerCase().match(/[a-zäöüß']+/g) || []) { if (DE_W.has(w)) de++; if (EN_W.has(w)) en++; }
@@ -84,7 +114,7 @@ function detect(t, fb) {
 }
 function mixed(text, base) {
   const out = [], push = (s, lang) => { s = String(s).replace(/_{2,}/g, "…").replace(/[*]/g, "").trim(); if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) return;
-    const last = out[out.length - 1]; if (last && last.lang === lang) last.text += " " + s; else out.push({ lang, text: s }); };
+    const last = out[out.length - 1]; if (last && last.lang === lang && !(lang === "de" && /[.!?]$/.test(last.text))) last.text += " " + s; else out.push({ lang, text: s }); };
   const re = /\*\*(.+?)\*\*|(^|[\s(„“])'([^'\n]{1,60})'(?=[\s.,;:!?)]|$)/g; let last = 0, m;
   while ((m = re.exec(String(text)))) { const start = m.index + (m[1] ? 0 : (m[2] || "").length); push(text.slice(last, start), base);
     const c = m[1] || m[3];
@@ -120,7 +150,11 @@ function speakable(lang, text) {
 }
 function buildLesson(id) {
   const M = BYID[id], L = LESSONS[id], q = [];
-  const say = (lang0, text0, pause, alt) => { const [lang, t] = speakable(lang0, text0);
+  const say = (lang0, text0, pause, alt) => {
+    if (lang0 === "de" && !alt) { const parts = splitDe(text0);
+      if (parts.length > 1) return parts.forEach((p, i) => say(p.lang, p.text, i === parts.length - 1 ? pause : 250));
+      if (parts.length === 1) { lang0 = parts[0].lang; text0 = parts[0].text; } }
+    const [lang, t] = speakable(lang0, text0);
     // German word lists ("Name. Vater.") become separate words with a pause each: TTS mangles dotted lists,
     // and single words can use real human recordings.
     if (lang === "de" && /^(?:[A-Za-zÄÖÜäöüß-]+\.\s*){2,}$/.test(t.trim())) {
@@ -221,7 +255,7 @@ function sayTitle(title, say) {
   });
   runs.forEach((r, i) => say(r.lang, r.text, i === runs.length - 1 ? 700 : 200));
 }
-window.WID_buildLesson = buildLesson; // used to check narration scripts
+window.WID_splitDe = splitDe; window.WID_buildLesson = buildLesson; // used to check narration scripts
 const P = { q: [], i: 0, on: false, gen: 0, id: null, auto: false, car: false, lock: null, t: null };
 async function wake() { try { if ("wakeLock" in navigator && !P.lock) { P.lock = await navigator.wakeLock.request("screen"); P.lock.addEventListener("release", () => { P.lock = null; }); } } catch (e) {} }
 function unwake() { if (P.lock) P.lock.release().catch(() => {}); P.lock = null; }
