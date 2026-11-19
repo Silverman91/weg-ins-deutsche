@@ -648,5 +648,10 @@ $("player").addEventListener("click", playerClick);
 $("car").addEventListener("click", playerClick);
 $("car").addEventListener("change", e => { if (e.target.id === "pAuto") P.auto = e.target.checked; });
 render();
-if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  // When an app update arrives, reload once so the new version runs now instead of on the next open.
+  const hadSW = !!navigator.serviceWorker.controller; let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadSW && !reloaded && !P.on && !G.running) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.register("sw.js").then(r => r.update()).catch(() => {});
+}
 })();
