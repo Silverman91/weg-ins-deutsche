@@ -230,6 +230,16 @@ body.has-player main .wrap{padding-bottom:calc(170px + env(safe-area-inset-botto
 .carctrl .pbtn{width:84px;height:84px;font-size:34px;border-radius:50%;background:var(--tile-soft)}
 .carctrl .pbtn.main{width:112px;height:112px;font-size:44px;background:var(--tile);color:var(--surface)}
 .carauto{display:flex;gap:8px;align-items:center}
+.car:has(.plist){place-items:stretch}
+.plist{width:100%;max-width:640px;margin:0 auto;height:100%;display:grid;grid-template-rows:auto 1fr auto;gap:12px;min-height:0}
+.plhead{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.pllines{margin:0;padding:0;list-style:none;overflow-y:auto;min-height:0;display:grid;gap:4px;align-content:start}
+.pllines li{padding:10px 12px;border-radius:10px;cursor:pointer;line-height:1.4;font-size:17px;border:1px solid transparent}
+.pllines li.de{font-weight:600}
+.pllines li:hover{background:var(--tile-soft)}
+.pllines li.cur{background:var(--tile-soft);border-color:var(--tile)}
+.plctrl{justify-content:center}
+.plctrl .pbtn{width:64px;height:64px;font-size:26px}.plctrl .pbtn.main{width:80px;height:80px;font-size:32px}
 nav.bottom .wrap{grid-template-columns:repeat(7,1fr)}
 nav.bottom button{font-size:10px}
 /* games */

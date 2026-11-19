@@ -238,7 +238,7 @@ function playerDone() {
   P.on = false; unwake(); P.i = P.q.length - 1; renderPlayer();
 }
 function playerJump(d) { P.i = Math.max(0, Math.min(P.q.length - 1, P.i + d)); if (P.on) playerStep(); else renderPlayer(); }
-function playerClose() { playerPause(); P.id = null; P.car = false; renderPlayer(); }
+function playerClose() { playerPause(); P.id = null; P.car = false; P.list = false; renderPlayer(); }
 function renderPlayer() {
   const bar = $("player"), car = $("car"); if (!bar) return;
   document.body.classList.toggle("has-player", !!P.id);
@@ -249,14 +249,30 @@ function renderPlayer() {
       navigator.mediaSession.playbackState = P.on ? "playing" : "paused"; } catch (e) {}
   }
   const ctrls = `<button class="pbtn" data-p="back" aria-label="Back">⏮</button><button class="pbtn main" data-p="toggle" aria-label="${P.on ? "Pause" : "Play"}">${P.on ? "⏸" : "▶"}</button><button class="pbtn" data-p="fwd" aria-label="Forward">⏭</button>`;
+  if (P.list) { bar.hidden = true; car.hidden = false; return renderPlayerList(); }
+  car.dataset.list = "";
   bar.hidden = P.car; car.hidden = !P.car;
   bar.innerHTML = `<div class="wrap pwrap"><div class="pinfo"><b>🎧 Lesson ${M.n}: ${esc(M.title)}</b><span><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</span><div class="pbar"><i style="width:${pct}%"></i></div></div>
-    <div class="pctrl">${ctrls}<button class="pbtn" data-p="car" aria-label="Car mode">🚗</button><button class="pbtn" data-p="close" aria-label="Close">✕</button></div></div>`;
+    <div class="pctrl">${ctrls}<button class="pbtn" data-p="list" aria-label="All lines">☰</button><button class="pbtn" data-p="car" aria-label="Car mode">🚗</button><button class="pbtn" data-p="close" aria-label="Close">✕</button></div></div>`;
   car.innerHTML = `<div class="carin"><div class="eyebrow">Lesson ${M.n} · ${pct}%</div><h2>${esc(M.title)}</h2>
     <p class="cartext"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</p>
     <div class="carctrl">${ctrls}</div>
+    <button class="btn" data-p="list">☰ All lines: jump to any part</button>
     <label class="note carauto"><input type="checkbox" id="pAuto" ${P.auto ? "checked" : ""}> Keep going to the next lesson</label>
     <button class="btn" data-p="exitcar">Exit car mode</button></div>`;
+}
+// Every line of the lesson in one scrollable list: tap one to play from there.
+function renderPlayerList() {
+  const car = $("car"), M = BYID[P.id];
+  if (car.dataset.list !== P.id + "|" + P.q.length) {
+    car.dataset.list = P.id + "|" + P.q.length;
+    car.innerHTML = `<div class="plist"><div class="plhead"><b>Lesson ${M.n}: ${esc(M.title)}</b><button class="btn small" data-p="closelist">Done</button></div>
+      <ol class="pllines">${P.q.map((s, i) => `<li data-p="goto" data-i="${i}" class="${s.lang}"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</li>`).join("")}</ol>
+      <div class="carctrl plctrl"></div></div>`;
+  }
+  car.querySelector(".plctrl").innerHTML = `<button class="pbtn" data-p="back" aria-label="Back">⏮</button><button class="pbtn main" data-p="toggle" aria-label="${P.on ? "Pause" : "Play"}">${P.on ? "⏸" : "▶"}</button><button class="pbtn" data-p="fwd" aria-label="Forward">⏭</button>`;
+  const old = car.querySelector("li.cur"), cur = car.querySelector(`li[data-i="${P.i}"]`);
+  if (old !== cur) { if (old) old.classList.remove("cur"); if (cur) { cur.classList.add("cur"); if (!P.listTouched) cur.scrollIntoView({ block: "center" }); } }
 }
 function playerClick(e) {
   const b = e.target.closest("[data-p]"); if (!b) return; const a = b.dataset.p;
@@ -265,6 +281,9 @@ function playerClick(e) {
   else if (a === "fwd") playerJump(1);
   else if (a === "car") { P.car = true; renderPlayer(); }
   else if (a === "exitcar") { P.car = false; renderPlayer(); }
+  else if (a === "list") { P.list = true; P.listTouched = false; renderPlayer(); }
+  else if (a === "closelist") { P.list = false; renderPlayer(); }
+  else if (a === "goto") { P.i = +b.dataset.i; P.listTouched = false; P.on ? playerStep() : playerPlay(); }
   else if (a === "close") playerClose();
 }
 
@@ -646,6 +665,8 @@ $("view").addEventListener("keydown", e => {
 ui.rate = get("rate", 0.9);
 $("player").addEventListener("click", playerClick);
 $("car").addEventListener("click", playerClick);
+{ let t; const touched = () => { if (!P.list) return; P.listTouched = true; clearTimeout(t); t = setTimeout(() => { P.listTouched = false; }, 5000); };
+  ["touchstart", "wheel"].forEach(ev => $("car").addEventListener(ev, touched, { passive: true })); }
 $("car").addEventListener("change", e => { if (e.target.id === "pAuto") P.auto = e.target.checked; });
 render();
 if ("serviceWorker" in navigator && location.protocol === "https:") {
