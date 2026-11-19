@@ -213,17 +213,21 @@ function playerStep() {
   if (synth && (synth.speaking || synth.pending)) synth.cancel();
   if (P.i >= P.q.length) return playerDone();
   const s = P.q[P.i], url = clipUrl(s.lang, s.alt, s.text);
+  const twice = P.rep && s.lang === "de" && s.text.trim().split(/\s+/).length <= 3; let said = 0;
+  const again = (fn) => { said++; if (!twice || said > 1) return false; P.t = setTimeout(() => { if (g === P.gen && P.on) fn(); }, 1600 / (url ? audioRate() : 1)); return true; };
   const after = () => { if (g !== P.gen || !P.on) return; P.t = setTimeout(() => { if (g !== P.gen || !P.on) return; P.i++; playerStep(); }, (s.pause || 350) / (url ? audioRate() : 1)); };
   renderPlayer();
   if (url) { // natural recorded voice
-    audioEl.src = url; audioEl.playbackRate = audioRate(); audioEl.onended = after; audioEl.onerror = after;
-    audioEl.play().catch(after); return;
+    audioEl.src = url; audioEl.playbackRate = audioRate(); audioEl.onerror = after;
+    const playIt = () => audioEl.play().catch(after);
+    audioEl.onended = () => { if (!again(() => { audioEl.currentTime = 0; playIt(); })) after(); };
+    playIt(); return;
   }
   if (!synth) return after(); // no clip and no phone voice: skip this line
   const u = new SpeechSynthesisUtterance(s.text);
   u.lang = s.lang === "de" ? "de-DE" : "en-GB"; const v = s.lang === "de" ? deVoice : enVoice; if (v) u.voice = v;
   u.rate = (ui.rate || 0.9) * (s.lang === "de" ? 0.95 : 1.05); if (s.alt) u.pitch = 1.25;
-  u.onend = u.onerror = after;
+  u.onerror = after; u.onend = () => { if (!again(() => synth.speak(u))) after(); };
   synth.speak(u);
 }
 if ("mediaSession" in navigator) { // headphone / car / lock-screen buttons
@@ -258,18 +262,21 @@ function renderPlayer() {
     <p class="cartext"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</p>
     <div class="carctrl">${ctrls}</div>
     <button class="btn" data-p="list">☰ All lines: jump to any part</button>
+    ${repBtn()}
     <label class="note carauto"><input type="checkbox" id="pAuto" ${P.auto ? "checked" : ""}> Keep going to the next lesson</label>
     <button class="btn" data-p="exitcar">Exit car mode</button></div>`;
 }
 // Every line of the lesson in one scrollable list: tap one to play from there.
+const repBtn = () => `<button class="btn ${P.rep ? "primary" : ""}" data-p="rep" aria-pressed="${!!P.rep}">🔁 Say German words twice: ${P.rep ? "on" : "off"}</button>`;
 function renderPlayerList() {
   const car = $("car"), M = BYID[P.id];
   if (car.dataset.list !== P.id + "|" + P.q.length) {
     car.dataset.list = P.id + "|" + P.q.length;
     car.innerHTML = `<div class="plist"><div class="plhead"><b>Lesson ${M.n}: ${esc(M.title)}</b><button class="btn small" data-p="closelist">Done</button></div>
       <ol class="pllines">${P.q.map((s, i) => `<li data-p="goto" data-i="${i}" class="${s.lang}"><i class="lang">${s.lang.toUpperCase()}</i> ${esc(s.text)}</li>`).join("")}</ol>
-      <div class="carctrl plctrl"></div></div>`;
+      <div class="plrep"></div><div class="carctrl plctrl"></div></div>`;
   }
+  car.querySelector(".plrep").innerHTML = repBtn();
   car.querySelector(".plctrl").innerHTML = `<button class="pbtn" data-p="back" aria-label="Back">⏮</button><button class="pbtn main" data-p="toggle" aria-label="${P.on ? "Pause" : "Play"}">${P.on ? "⏸" : "▶"}</button><button class="pbtn" data-p="fwd" aria-label="Forward">⏭</button>`;
   const old = car.querySelector("li.cur"), cur = car.querySelector(`li[data-i="${P.i}"]`);
   if (old !== cur) { if (old) old.classList.remove("cur"); if (cur) { cur.classList.add("cur"); if (!P.listTouched) cur.scrollIntoView({ block: "center" }); } }
@@ -281,6 +288,7 @@ function playerClick(e) {
   else if (a === "fwd") playerJump(1);
   else if (a === "car") { P.car = true; renderPlayer(); }
   else if (a === "exitcar") { P.car = false; renderPlayer(); }
+  else if (a === "rep") { P.rep = !P.rep; put("rep", P.rep); renderPlayer(); }
   else if (a === "list") { P.list = true; P.listTouched = false; renderPlayer(); }
   else if (a === "closelist") { P.list = false; renderPlayer(); }
   else if (a === "goto") { P.i = +b.dataset.i; P.listTouched = false; P.on ? playerStep() : playerPlay(); }
@@ -673,6 +681,7 @@ $("view").addEventListener("keydown", e => {
 });
 
 ui.rate = get("rate", 0.9);
+P.rep = !!get("rep", false);
 $("player").addEventListener("click", playerClick);
 $("car").addEventListener("click", playerClick);
 { let t; const touched = () => { if (!P.list) return; P.listTouched = true; clearTimeout(t); t = setTimeout(() => { P.listTouched = false; }, 5000); };
