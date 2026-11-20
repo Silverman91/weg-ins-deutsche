@@ -17,8 +17,10 @@ Lesson content (`lessons-*.js`, `content.js`, `glosses.js`) and the app logic (`
 
 ## Check everything
 
-```n node tools/check.js
-```n
+```
+node tools/check.js
+```
+
 Checks that every lesson is complete and its exercises are well-formed, that every line the app can speak has a clip (and `audio/index.json` matches the clips on disk), that German lines have an English meaning for car mode, and that every file the page and the service worker load exists. Exits with an error if something is broken. Run it before every push.
 
 ## Preview locally
@@ -38,7 +40,9 @@ After changing lesson text, regenerate the audio in this order (run Python from 
 1. `node tools/tts/export_lines.js . <work>/lines.json` lists every line the narrator speaks.
 2. `python tools/tts/gen_all.py` generates missing clips (Emily for English, Greta for German; single words get several takes checked by Whisper).
 3. `python tools/tts/apply_ll.py` swaps in the real word recordings (Lingua Libre, then older Wiktionary ones) and writes the credits.
-4. `python tools/tts/audit_sentences.py check` (then `fix`) has Whisper listen to Greta's sentences and re-makes the ones with skipped or garbled words.
+4. `python tools/tts/audit_sentences.py check` (then `fix`) has Whisper listen to Greta's sentences and re-makes the ones with skipped, repeated or garbled words. After changing how sentences are scored, `rescore` reuses the saved transcripts instead of listening again.
+
+5. `node tools/audio-updates.js` (just before committing) lists clips whose sound changed but whose file name did not, so phones that already downloaded them fetch the new version. `apply_ll.py` re-encodes every real recording with a new stream ID but the same sound; restore those with `git checkout` first so only real changes are listed and pushed.
 
 Recordings come from Lingua Libre via `fetch_ll_list.py` → `ll_exact.py` → `ll_download.py`, and from Wiktionary's older `De-<word>` files via `wikt.py list` → `match` → `download` (all polite and rate-limited). Wiktionary clips that Whisper hears as a different word are listed in `<work>/wikt_reject.json` and skipped.
 

@@ -22,12 +22,36 @@ OUT = WORK / "sentence_audit.json"
 LIMIT = 0.75
 
 
+ONES = "null eins zwei drei vier fünf sechs sieben acht neun zehn elf zwölf".split()
+TENS = {2: "zwanzig", 3: "dreißig", 4: "vierzig", 5: "fünfzig", 6: "sechzig", 7: "siebzig", 8: "achtzig", 9: "neunzig"}
+
+
+def num_de(n):
+    """German number word (0..999999), written together the way it is spoken: 45 -> fünfundvierzig."""
+    if n < 13:
+        return ONES[n]
+    if n < 20:
+        return {16: "sechzehn", 17: "siebzehn"}.get(n, ONES[n - 10] + "zehn")
+    if n < 100:
+        t, o = divmod(n, 10)
+        return (("ein" if o == 1 else ONES[o]) + "und" if o else "") + TENS[t]
+    if n < 1000:
+        h, r = divmod(n, 100)
+        return ("ein" if h == 1 else ONES[h]) + "hundert" + (num_de(r) if r else "")
+    k, r = divmod(n, 1000)
+    return ("ein" if k == 1 else num_de(k)) + "tausend" + (num_de(r) if r else "")
+
+
 def words(s):
-    return re.findall(r"[a-zäöüß0-9]+", s.lower().replace("ß", "ss"))
+    s = re.sub(r"\d+", lambda m: " " + num_de(int(m.group())) + " " if len(m.group()) < 7 else m.group(), s.lower())
+    return re.findall(r"[a-zäöü0-9]+", s.replace("ß", "ss"))
 
 
 def score(want, got):
-    return difflib.SequenceMatcher(None, words(want), words(got)).ratio()
+    """How much of the text Whisper heard, in order (0..1). Letters are compared with the spaces taken out,
+    so writing a compound together ("Dankeschön") or a number as digits ("20") does not count as a mistake."""
+    a, b = "".join(words(want)), "".join(words(got))
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() if a or b else 1.0
 
 
 def generated():
@@ -55,10 +79,23 @@ def check(items):
 def cmd_check():
     res = check(generated())
     OUT.write_text(json.dumps(res, ensure_ascii=False, indent=0), encoding="utf-8")
+    report(res)
+
+
+def report(res):
     low = sorted((v for v in res.values() if v["score"] < LIMIT), key=lambda v: v["score"])
     print(f"{len(res)} sentences checked, {len(low)} below {LIMIT}")
-    for v in low[:60]:
+    for v in low[:int(sys.argv[2]) if len(sys.argv) > 2 else 60]:
         print(f"  {v['score']:.2f}  {v['text']}  | heard: {v['heard']}")
+
+
+def cmd_rescore():
+    """Score the saved transcripts again (after changing score()) without running Whisper."""
+    res = json.loads(OUT.read_text(encoding="utf-8"))
+    for v in res.values():
+        v["score"] = round(score(v["text"], v["heard"]), 3)
+    OUT.write_text(json.dumps(res, ensure_ascii=False, indent=0), encoding="utf-8")
+    report(res)
 
 
 def cmd_fix():
@@ -93,4 +130,5 @@ def cmd_fix():
 
 
 if __name__ == "__main__":
-    {"check": cmd_check, "fix": cmd_fix}[sys.argv[1]]()
+    sys.stdout.reconfigure(encoding="utf-8")
+    {"check": cmd_check, "rescore": cmd_rescore, "fix": cmd_fix}[sys.argv[1]]()

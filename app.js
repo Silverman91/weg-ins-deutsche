@@ -51,7 +51,16 @@ if (synth) { pickVoice(); synth.onvoiceschanged = () => { pickVoice(); if (ui.vi
 // A clip's file name is a hash of language, speaker and exact text, so the app and the generator agree.
 const clipHash = (lang, alt, text) => { let h = 2166136261; for (const ch of `${lang}|${alt ? 1 : 0}|${text}`) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8, "0"); };
 let CLIPS = null, AUDINFO = null;
-fetch("audio/index.json").then(r => (r.ok ? r.json() : null)).then(d => { if (d && d.clips) { CLIPS = new Set(d.clips); AUDINFO = d; render(); } }).catch(() => {});
+fetch("audio/index.json").then(r => (r.ok ? r.json() : null)).then(d => { if (d && d.clips) { CLIPS = new Set(d.clips); AUDINFO = d; render(); dropStaleClips(d); } }).catch(() => {});
+// A clip keeps its file name when its sound is improved (a real recording, a better take), so a phone that downloaded it
+// earlier would keep the old one. index.json lists those changes by revision; delete the stale copies so they are fetched again.
+async function dropStaleClips(d) {
+  const ups = d.updates || []; if (!ups.length || !("caches" in window)) return;
+  let seen = 0; try { seen = +localStorage.getItem("wid-audio-rev") || 0; } catch (e) {}
+  const todo = ups.filter(u => u[0] > seen); if (!todo.length) return;
+  try { const cache = await caches.open("wid-audio"); await Promise.all(todo.flatMap(u => u[1].map(h => cache.delete("audio/c/" + h + ".ogg"))));
+    localStorage.setItem("wid-audio-rev", String(Math.max(...ups.map(u => u[0])))); } catch (e) {}
+}
 const clipUrl = (lang, alt, text) => { if (!CLIPS) return null; const h = clipHash(lang, alt, String(text)); return CLIPS.has(h) ? "audio/c/" + h + ".ogg" : null; };
 const audioEl = new Audio(); audioEl.preload = "auto"; try { audioEl.preservesPitch = true; } catch (e) {}
 const audioRate = () => (ui.rate || 0.9) / 0.9;
