@@ -55,6 +55,8 @@ def main():
     items = json.loads((ROOT / "lines.json").read_text(encoding="utf-8"))["items"]
     real = ROOT / "ll_exact.json"   # segments that get a real human recording (apply_ll.py) need no TTS
     real = set(json.loads(real.read_text(encoding="utf-8"))) if real.exists() else set()
+    wk = ROOT / "wikt_exact.json"   # older Wiktionary recordings (wikt.py)
+    real |= set(json.loads(wk.read_text(encoding="utf-8"))) if wk.exists() else set()
     core = "--core" in sys.argv   # Core 2,000 card words: only when asked (they get real recordings first)
     todo = [i for i in items if not out_path(i).exists() and i["h"] not in real and (core or not i.get("core"))]
     print(f"{len(items)} clips, {len(todo)} to make ({len(real)} come from real recordings)", flush=True)

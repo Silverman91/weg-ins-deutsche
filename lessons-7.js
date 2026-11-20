@@ -88,7 +88,7 @@ Object.assign(window.LESSONS, {
   ["c", "___ Montag arbeite ich.", ["Am", "Um", "Im"], 0, "Days take am."],
   ["c", "Ich habe ___ Mai Urlaub.", ["am", "um", "im"], 2, "Months take im."],
   ["c", "___ Winter ist es kalt.", ["Am", "Im", "Um"], 1, "Seasons take im."],
-  ["c", "Mein Geburtstag ist am ___ Mai. (3rd)", ["drei", "dritten", "dritte"], 1, "After am the date ends in -ten: am dritten Mai."],
+  ["c", "Mein Geburtstag ist am ___ Mai. (the third)", ["drei", "dritten", "dritte"], 1, "After am the date ends in -ten: am dritten Mai."],
   ["w", "Write: 'on Saturday'", "am Samstag", [], "Days take am."],
   ["w", "Write: 'at seven o'clock'", "um sieben Uhr", ["um 7 Uhr"], "Clock times take um."]],
  tip: "A quick rule: um for the clock, am for the day, im for the month."
@@ -108,7 +108,7 @@ Object.assign(window.LESSONS, {
   ["schmecken", "to taste (good)", "Schmeckt es dir?"], ["danken", "to thank (+ dative)", "Ich danke Ihnen."], ["antworten", "to answer (+ dative)", "Antworte mir!"]],
  e: [["c", "Kannst du ___ helfen? (me)", ["mich", "mir", "ich"], 1, "helfen takes the dative: mir."],
   ["c", "Der Film gefällt ___. (him)", ["ihn", "er", "ihm"], 2, "gefallen takes the dative: ihm."],
-  ["c", "Das Buch gehört ___. (her)", ["sie", "ihr", "ihre"], 1, "gehören takes the dative: ihr."],
+  ["c", "Das Buch gehört ___. (to her)", ["sie", "ihr", "ihre"], 1, "gehören takes the dative: ihr."],
   ["c", "Which one means 'I like the soup'?", ["Ich gefalle die Suppe.", "Die Suppe gefällt mir.", "Mir gefalle ich die Suppe."], 1, "The thing you like is the subject: Die Suppe gefällt mir."],
   ["c", "Ich danke ___. (you, formal)", ["Sie", "Ihnen", "Ihr"], 1, "danken takes the dative: Ihnen."],
   ["w", "Write: 'Can you help me?' (casual)", "Kannst du mir helfen?", [], "helfen takes the dative: mir."],

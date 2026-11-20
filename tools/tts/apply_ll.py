@@ -39,6 +39,31 @@ def main():
     credits = [{"who": sp, "license": ", ".join(sorted(u["licences"])),
                 "what": f"{u['n']} German word recording{'s' if u['n'] != 1 else ''} via Lingua Libre (Wikimedia Commons); converted and volume-adjusted"}
                for sp, u in sorted(used.items(), key=lambda kv: -kv[1]["n"])]
+    # older Wiktionary recordings (wikt.py) for segments Lingua Libre doesn't have
+    wk = ROOT / "wikt_exact.json"
+    wk = json.loads(wk.read_text(encoding="utf-8")) if wk.exists() else {}
+    info = ROOT / "wikt_info.json"
+    info = json.loads(info.read_text(encoding="utf-8")) if info.exists() else {}
+    wused = {}
+    for h, v in wk.items():
+        raw = ROOT / "wikt_raw" / v["file"].split(":", 1)[1].replace(" ", "_")
+        if h in hits or not raw.exists():
+            continue
+        try:
+            wav, _ = librosa.load(raw, sr=24000, mono=True)
+        except Exception as e:  # a broken upload: keep the generated clip
+            print("skip", raw.name, e)
+            continue
+        sf.write(TMP / "ll.wav", level(trim(wav, thresh=0.02, pad=0.06)), 24000)
+        encode(TMP / "ll.wav", CLIPS / f"{h}.ogg")
+        meta = info.get(v["file"], {})
+        u = wused.setdefault(meta.get("artist", "unknown"), {"n": 0, "licences": set()})
+        u["n"] += 1
+        u["licences"].add(meta.get("licence", "see Wikimedia Commons"))
+    credits += [{"who": sp, "license": ", ".join(sorted(u["licences"])),
+                 "what": f"{u['n']} German word recording{'s' if u['n'] != 1 else ''} via Wiktionary (Wikimedia Commons); converted and volume-adjusted"}
+                for sp, u in sorted(wused.items(), key=lambda kv: -kv[1]["n"])]
+    print(f"Wiktionary recordings applied: {sum(u['n'] for u in wused.values())} from {len(wused)} speakers")
     idx_path = APP / "audio" / "index.json"
     idx = json.loads(idx_path.read_text(encoding="utf-8"))
     idx["clips"] = sorted(p.stem for p in CLIPS.glob("*.ogg"))

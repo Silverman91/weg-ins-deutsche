@@ -75,7 +75,7 @@ const stopSpeak = () => { if (P.on) return; seqGen++; audioEl.pause(); if (synth
 const canSpeak = () => !!synth || !!CLIPS;
 
 /* ---------------- lesson narration: podcast / car mode ---------------- */
-const DE_W = new Set("können müssen wollen dürfen sollen mögen gegen durch ohne bis ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit".split(" "));
+const DE_W = new Set("können müssen wollen dürfen sollen mögen gegen durch ohne bis ich du er sie es wir ihr der die das den dem des ein eine einen einem einer eines ist bin bist sind und oder aber nicht kein keine keinen mit von zu zum zur im ins auf für wer wo wie wann warum woher wohin ja nein bitte danke hallo gut sehr auch noch schon heute morgen hier habe hab hast hat haben mein meine dein deine sein ihr kann kannst muss möchte gern gerne deutsch mich dich sich uns euch mir dir wird wurde würde wäre hätte dort jetzt immer man doch mal halt sagt bei nach aus seit nachdem bevor obwohl".split(" "));
 const EN_W = new Set("the a is are were you your what which how why when where does do did means mean write say says of to with this that it it's i'm don't not her his him and or for from on at be by as if then than they them their he she we us our my me can will would should could translate sentence word words answer question correct like english german same both only very more most other people thing time day way good bad after before first last yes into about one two three use used usually lower upper case verb verbs noun nouns subject object past present future tense plural singular masculine feminine neuter nominative accusative dative genitive position end always never react ask back reply late politely voice messages vowels consonants irony understatement wordplay sarcasm markers greeting openings requests closing spoken written north contractions everyday slang questions polite casual formal location movement purpose regular irregular participle clause prefix stem ending endings change changes only everything else".split(" "));
 // Pieces of a "German" line that are really English (table labels, quiz options, notes in brackets) go to the
 // English voice. Words that exist in both languages never count as English on their own.
@@ -146,12 +146,15 @@ function deRuns(text) {
   push("en", t.slice(pos));
   return out;
 }
+// an unknown bold word is English if the course uses it in English, or it has a typical English ending (Subordinating)
+const looksEnglish = w => !/[äöüß]/.test(w) && !DE_W.has(w) && (engVocab().has(w) || engVocab().has(w.replace(/s$/, "")) || /(ing|tion|ly|ness|ment|ive|verbs?)$/.test(w));
 function mixed(text, base) {
   // bold inside a word (du f**ä**hrst) marks the whole word
   text = String(text).replace(/([A-Za-zÄÖÜäöüß]*)\*\*([^*\n]+?)\*\*([A-Za-zÄÖÜäöüß]*)/g, (m, a, b, c) => (a || c) ? "**" + a + b + c + "**" : m);
   const out = [], push0 = (s, lang) => { s = String(s).replace(/_{2,}/g, "…").replace(/[*]/g, "").trim();
-    if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) { const l = out[out.length - 1]; if (l && /^[,;.!?…]+$/.test(s) && !/[,;.!?…]$/.test(l.text)) l.text += s; return; } // keep list commas
-    const last = out[out.length - 1]; if (last && last.lang === lang && !(lang === "de" && /[.!?]$/.test(last.text))) last.text += " " + s; else out.push({ lang, text: s }); };
+    if (!/[A-Za-zÄÖÜäöüß0-9]/.test(s)) { const l = out[out.length - 1]; if (l && /^[,;.!?…]+$/.test(s) && !/[,;.!?…]$/.test(l.text)) l.text += s; if (l && /^:/.test(s)) l.stop = true; return; } // keep list commas
+    // German pieces stay apart after a sentence end or a colon ("gets **-en**: Ich besuche …")
+    const last = out[out.length - 1]; if (last && last.lang === lang && !last.stop && !(lang === "de" && /[.!?]$/.test(last.text))) last.text += " " + s; else out.push({ lang, text: s }); };
   const push = (s, lang) => { if (lang !== "en") return push0(s, lang); deRuns(s).forEach(p => push0(p.s, p.lang)); };
   const re = /\*\*(.+?)\*\*|(^|[\s(„“])'([^'\n]{1,60})'(?=[\s.,;:!?)]|$)/g; let last = 0, m;
   while ((m = re.exec(String(text)))) { const start = m.index + (m[1] ? 0 : (m[2] || "").length); push(text.slice(last, start), base);
@@ -160,7 +163,7 @@ function mixed(text, base) {
     let lang = m[1] ? detect(c, "de") : (quotedIsGerman(c) ? "de" : detect(c, "en"));
     const cw = c.toLowerCase().match(/[a-zäöüß]+(?:'[a-z]+)?/g) || [];
     if (m[1] && cw.length && cw.every(w => EN_X.has(w) && !EN_AMBIG.has(w))) lang = "en"; // **must**, **can**: bold English
-    if (lang === "de" && /^[a-z]{5,}$/i.test(c.trim()) && !germanLexicon().has(c.trim().toLowerCase())) lang = "en"; // e.g. **silent**
+    if (lang === "de" && /^[a-z]{5,}$/i.test(c.trim()) && !germanLexicon().has(c.trim().toLowerCase()) && looksEnglish(c.trim().toLowerCase())) lang = "en"; // e.g. **silent**, **Adverbs** (but not **durfte**)
     push(c, lang);
     last = re.lastIndex; }
   push(String(text).slice(last), base);
@@ -179,7 +182,10 @@ function speakable(lang, text) {
   let t = String(text).trim();
   if (lang !== "de") return [lang, t];
   if (/^\d{1,2}:\d{2}$/.test(t)) return ["en", t];
-  t = t.replace(/\s*\/\s*/g, ", ");
+  t = t.replace(/\s*\/\s*/g, ", ").replace(/\(\+n\)/g, "plus n");
+  // "Konjunktiv II" alone has a real recording; inside a sentence spell the number out so Greta says it
+  if (!/^Konjunktiv II?$/.test(t)) t = t.replace(/\bKonj(?:unktiv|\.)? II\b/g, "Konjunktiv zwei").replace(/\bKonj(?:unktiv|\.)? I\b/g, "Konjunktiv eins");
+  if ((t.match(/\(/g) || []).length !== (t.match(/\)/g) || []).length) t = t.replace(/[()]/g, "").trim(); // half a bracket: "(Perfekt"
   const bare = t.replace(/[.,:;!?]+$/, "");
   if (/^-[a-zäöüß]+-?$/i.test(bare)) return ["en", "the ending " + bare.replace(/-/g, "").toUpperCase().split("").join(" ")];
   if (/^[a-zäöüß]+-$/.test(bare)) return ["de", bare.slice(0, -1)];                       // a stem like "lern-"
