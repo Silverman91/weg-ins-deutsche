@@ -1,0 +1,38 @@
+plugins { id "com.android.application" }
+
+def signing = new Properties()
+rootProject.file("signing.properties").withInputStream { signing.load(it) }
+
+android {
+    namespace = "{{ID}}"
+    compileSdk = {{SDK}}
+    buildToolsVersion = "{{BUILD_TOOLS}}"
+    defaultConfig {
+        applicationId = "{{ID}}"
+        minSdk = 24
+        targetSdk = {{SDK}}
+        versionCode = {{CODE}}
+        versionName = "{{VERSION}}"
+    }
+    signingConfigs {
+        release {
+            storeFile = file(signing.getProperty("file"))
+            storePassword = signing.getProperty("password")
+            keyAlias = "app"
+            keyPassword = signing.getProperty("password")
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled = false
+            signingConfig = signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    // already-compressed media is stored as is, so it can be streamed straight from the APK
+    androidResources { noCompress "ogg", "oga", "opus", "mp3", "m4a", "aac", "mp4", "webm", "png", "jpg", "jpeg", "webp", "woff", "woff2" }
+    lint { checkReleaseBuilds = false; abortOnError = false }
+}

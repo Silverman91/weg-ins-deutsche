@@ -1,0 +1,13 @@
+{
+  "name": "Weg ins Deutsche",
+  "id": "io.github.silverman91.weginsdeutsche",
+  "version": "1.0",
+  "web": "..",
+  "start": "index.html",
+  "icon": "icon-512.png",
+  "color": "#9B2C2C",
+  "background": "#F8F6F4",
+  "orientation": "portrait",
+  "exclude": ["tools", "dist", "sw.js"],
+  "out": "../dist"
+}

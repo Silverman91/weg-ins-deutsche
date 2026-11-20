@@ -23,6 +23,14 @@ node tools/check.js
 
 Checks that every lesson is complete and its exercises are well-formed, that every line the app can speak has a clip (and `audio/index.json` matches the clips on disk), that German lines have an English meaning for car mode, and that every file the page and the service worker load exists. Exits with an error if something is broken. Run it before every push.
 
+## Android app (APK)
+
+```
+node tools/apk/build-apk.js build tools/apk.json
+```
+
+Builds `dist/weg-ins-deutsche-<version>.apk` with all lessons and audio inside it. Raise `version` in `tools/apk.json` for each release. Run `setup` once per computer first. The builder works for other projects too; see `tools/apk/README.md`.
+
 ## Preview locally
 
 ```

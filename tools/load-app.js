@@ -12,7 +12,7 @@ function loadApp(appDir) {
   });
   const store = {};
   const ctx = {
-    window: {}, console, setTimeout, clearTimeout, URL, Blob: function () {},
+    window: {}, addEventListener() {}, console, setTimeout, clearTimeout, URL, Blob: function () {},
     document: { getElementById: el, querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, body: el(), createElement: el, visibilityState: "visible" },
     localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => (store[k] = String(v)), removeItem: k => delete store[k], clear() {} },
     navigator: {}, location: { protocol: "file:" },

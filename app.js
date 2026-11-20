@@ -51,11 +51,12 @@ if (synth) { pickVoice(); synth.onvoiceschanged = () => { pickVoice(); if (ui.vi
 // A clip's file name is a hash of language, speaker and exact text, so the app and the generator agree.
 const clipHash = (lang, alt, text) => { let h = 2166136261; for (const ch of `${lang}|${alt ? 1 : 0}|${text}`) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8, "0"); };
 let CLIPS = null, AUDINFO = null;
+const IN_APK = /apk-builder\//.test(navigator.userAgent); // the Android app: every clip is inside the app, nothing to download
 fetch("audio/index.json").then(r => (r.ok ? r.json() : null)).then(d => { if (d && d.clips) { CLIPS = new Set(d.clips); AUDINFO = d; render(); dropStaleClips(d); } }).catch(() => {});
 // A clip keeps its file name when its sound is improved (a real recording, a better take), so a phone that downloaded it
 // earlier would keep the old one. index.json lists those changes by revision; delete the stale copies so they are fetched again.
 async function dropStaleClips(d) {
-  const ups = d.updates || []; if (!ups.length || !("caches" in window)) return;
+  const ups = d.updates || []; if (IN_APK || !ups.length || !("caches" in window)) return;
   let seen = 0; try { seen = +localStorage.getItem("wid-audio-rev") || 0; } catch (e) {}
   const todo = ups.filter(u => u[0] > seen); if (!todo.length) return;
   try { const cache = await caches.open("wid-audio"); await Promise.all(todo.flatMap(u => u[1].map(h => cache.delete("audio/c/" + h + ".ogg"))));
@@ -686,15 +687,15 @@ function vProgress() {
   <section class="card"><h2>Series ladder</h2><p class="note">Move up a tier when you follow 70–80% without pausing. Watching needs internet; everything else in this app works offline.</p>
    ${SERIES.map(t => `<details><summary>${t.tier} · ${t.lvl} <span class="subs">${t.subs}</span></summary><div>${t.shows.map(s => `<div class="show"><span class="n">${esc(s[0])}</span><span class="w">${esc(s[1])}</span><p>${esc(s[2])}</p></div>`).join("")}</div></details>`).join("")}</section>
   <section class="card"><h2>Voice</h2>
-   <p class="note">${!synth ? "This browser can't read text aloud." : deVoice ? "Using the German voice: " + esc(deVoice.name) + "." : "No German voice found. On Android, open Settings → System → Languages → Text-to-speech, and download German (Deutsch) for offline use."}</p>
+   <p class="note">${!synth ? (IN_APK ? "Lessons use the natural voices built into this app." : "This browser can't read text aloud.") : deVoice ? "Using the German voice: " + esc(deVoice.name) + "." : "No German voice found. On Android, open Settings → System → Languages → Text-to-speech, and download German (Deutsch) for offline use."}</p>
    ${synth ? `<div class="btnrow"><span class="note">Speed</span><span class="seg" role="group" aria-label="Speech speed">${[[0.7, "Slow"], [0.9, "Normal"], [1.05, "Fast"]].map(([r, l]) => `<button data-rate="${r}" aria-pressed="${(ui.rate || 0.9) === r}">${l}</button>`).join("")}</span>${listenBtn("data-test-voice", "Test")}</div>` : ""}</section>
   <section class="card"><h2>Lesson audio</h2>
-   ${CLIPS ? `<p class="note">${CLIPS.size.toLocaleString()} natural voice clips for the narrated lessons. They play from the internet and are kept on the phone once heard. To listen offline (car, plane), download them all once on Wi-Fi.</p>
+   ${CLIPS && IN_APK ? `<p class="note">All ${CLIPS.size.toLocaleString()} natural voice clips are built into this app, so every lesson plays offline.</p>` : CLIPS ? `<p class="note">${CLIPS.size.toLocaleString()} natural voice clips for the narrated lessons. They play from the internet and are kept on the phone once heard. To listen offline (car, plane), download them all once on Wi-Fi.</p>
    <div class="btnrow"><button class="btn primary" data-dl-audio ${dl.on ? "disabled" : ""}>${dl.on ? "Downloading…" : "Download all lesson audio (about " + Math.max(1, Math.round(CLIPS.size * 0.012)) + " MB)"}</button></div>
    <p class="note" id="audMsg">${esc(dl.msg)}</p>` : `<p class="note">Natural voices aren't available yet (or can't be reached offline). Lessons use your phone's voice instead.</p>`}</section>
   <section class="card"><h2>Credits</h2><p class="note">Narration voices made with Neuphonic's open models: ${AUDINFO && AUDINFO.voices ? esc(Object.values(AUDINFO.voices).join("; ")) : "NeuTTS (Neuphonic)"}. Audio decoding: NeuCodec (Neuphonic). Speech generated on a home PC; no internet service is used while you learn.</p>
    ${AUDINFO && AUDINFO.credits ? `<div>${AUDINFO.credits.map(c => `<div class="show"><span class="n">${esc(c.who)}</span><span class="w">${esc(c.license)}</span><p>${esc(c.what)}</p></div>`).join("")}</div>` : ""}</section>
-  <section class="card"><h2>Backup</h2><p class="note">Your progress lives only on this phone. Save a backup file now and then, especially before clearing browser data or changing phones.</p>
+  <section class="card"><h2>Backup</h2><p class="note">Your progress lives only on this phone. Save a backup file now and then, especially before ${IN_APK ? "uninstalling the app" : "clearing browser data"} or changing phones.</p>
    <div class="btnrow"><button class="btn" data-export>Save backup file</button><label class="btn" for="importFile">Restore from file</label><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="note" id="backupMsg"></p></section>
   <button class="reset" id="resetBtn">Reset all progress</button><div id="resetConfirm" hidden class="btnrow"><span class="note">Clear lessons, cards, ticks and hours?</span><button class="btn small" id="resetYes">Yes, reset</button><button class="btn small" id="resetNo">Cancel</button></div>`;
 }
@@ -935,7 +936,17 @@ $("car").addEventListener("click", playerClick);
   ["touchstart", "wheel"].forEach(ev => $("car").addEventListener(ev, touched, { passive: true })); }
 $("car").addEventListener("change", e => { if (e.target.id === "pAuto") P.auto = e.target.checked; });
 render();
-if ("serviceWorker" in navigator && location.protocol === "https:") {
+// Android app (tools/apk): the phone's Back button closes the open screen first: player list, car mode, a lesson, then a tab.
+window.addEventListener("apkback", e => {
+  const back = document.querySelector("main [data-back]");
+  if (P.list) { P.list = false; renderPlayer(); }
+  else if (P.car) { P.car = false; renderPlayer(); }
+  else if (back) back.click();
+  else if (ui.view !== "today") go("today");
+  else return;
+  e.preventDefault();
+});
+if ("serviceWorker" in navigator && location.protocol === "https:" && !IN_APK) {
   // When an app update arrives, reload once so the new version runs now instead of on the next open.
   const hadSW = !!navigator.serviceWorker.controller; let reloaded = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadSW && !reloaded && !P.on && !G.running) { reloaded = true; location.reload(); } });
