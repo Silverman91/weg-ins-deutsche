@@ -25,11 +25,12 @@ import torch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import WORK, LLAMA_SERVER  # noqa: E402
+from textnorm import normalize as de_normalize  # noqa: E402
 ROOT = WORK
 SERVER_EXE = LLAMA_SERVER
 SAMPLES = ROOT / "neutts-src" / "samples"
 CACHE = ROOT / "cache"
-CACHE_VERSION = "1"
+CACHE_VERSION = "2"  # 2: German text cleaned up by textnorm.py before speaking
 
 MODELS = {
     "en2e": ("neuphonic/neutts-2e-q8-gguf", "neutts-2e-Q8_0.gguf", "bpe", None),
@@ -38,7 +39,7 @@ MODELS = {
 }
 # Language each reference clip is spoken in, so its transcript is phonemised correctly even when a
 # German model clones an English speaker (e.g. Emily speaking German).
-REF_LANG = {"emily": "en", "paul": "en", "sophie": "en", "steven": "en", "dave": "en", "jo": "en", "greta": "de"}
+REF_LANG = {"emily": "en", "paul": "en", "sophie": "en", "steven": "en", "dave": "en", "jo": "en", "greta": "de", "greta_q": "de", "greta_x": "de"}
 _QUOTES = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"', "„": '"'})
 
 
@@ -56,11 +57,12 @@ def norm_text(t):
 
 
 class Engine:
-    def __init__(self, model, port=8767):
+    def __init__(self, model, port=8767, slots=1):
         from huggingface_hub import hf_hub_download
         from neucodec import NeuCodec
 
         self.model = model
+        self.slots = slots
         repo, fname, self.fmt, lang = MODELS[model]
         self.url = f"http://127.0.0.1:{port}"
         gguf = hf_hub_download(repo, fname)
@@ -68,7 +70,8 @@ class Engine:
             raise RuntimeError(f"Something is already running on port {port}")
         log = open(ROOT / f"llama-server-{model}.log", "w", encoding="utf-8")
         self.proc = subprocess.Popen(
-            [str(SERVER_EXE), "-m", gguf, "-ngl", "99", "-c", "4096", "--host", "127.0.0.1", "--port", str(port), "-np", "1"],
+            # `slots` requests run at once (llama.cpp splits the context between them: 4096 tokens each)
+            [str(SERVER_EXE), "-m", gguf, "-ngl", "99", "-c", str(4096 * slots), "--host", "127.0.0.1", "--port", str(port), "-np", str(slots)],
             stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         atexit.register(self.close)
         t = time.time()
@@ -155,7 +158,12 @@ class Engine:
         """Returns 24 kHz mono float32 audio. Retries with another seed if the length looks wrong.
         `text` is a string, or for phoneme models a list of (lang, text) parts."""
         text = [(l, norm_text(t)) for l, t in text] if isinstance(text, (list, tuple)) else norm_text(text)
-        plain = " ".join(t for _, t in text) if isinstance(text, list) else text
+        # German text: numbers, money, times, abbreviations, acronyms, symbols and the lexicon in words (textnorm.py)
+        if isinstance(text, list):
+            text = [(l, de_normalize(t) if l == "de" else t) for l, t in text]
+        elif self._lang == "de":
+            text = de_normalize(text)
+        plain =" ".join(t for _, t in text) if isinstance(text, list) else text
         expect = max(0.6, len(plain) * 0.065)         # rough seconds for this text
         best = None
         for k in range(tries):

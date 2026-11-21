@@ -8,17 +8,30 @@ Voices: English = Emily (neutts-2e); German = Greta (neutts-nano-german); the se
 Every clip is loudness-matched. Resumable: existing clips are skipped, so it can be stopped and rerun.
 """
 import json
+import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import numpy as np
 
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).parent))
-from langtts import Engine, trim, encode  # noqa: E402
+from langtts import Engine, trim, encode, SAMPLES  # noqa: E402
+
+
+def greta_for(text):
+    """Greta's reference for this line: a question melody for "?", a lively one for "!" (made by make_refs.py,
+    used only once those samples exist), the plain one otherwise."""
+    end = text.rstrip(" \"'“”„)…")[-1:]
+    ref = {"?": "greta_q", "!": "greta_x"}.get(end)
+    return ref if ref and (SAMPLES / f"{ref}.wav").exists() else "greta"
 from leveling import level  # noqa: E402
 from words import clean_words  # noqa: E402
+from carrier import carrier_words  # noqa: E402
 
 from paths import WORK, APP  # noqa: E402
 ROOT = WORK
@@ -36,8 +49,47 @@ def out_path(item):
 
 
 def save(item, wav):
-    sf.write(TMP / "c.wav", level(wav), SR)
-    encode(TMP / "c.wav", out_path(item))
+    tmp = TMP / f"c_{item['h']}.wav"          # one temp file per clip: clips are saved from several threads
+    sf.write(tmp, level(wav), SR)
+    encode(tmp, out_path(item))
+    tmp.unlink(missing_ok=True)
+
+
+SLOTS = int(os.environ.get("GRETA_SLOTS", "4"))   # requests at once; 4 was fastest on the RX 5700 XT
+# single words in a carrier sentence (carrier.py), cut out: off by default; in an A/B test on 40 words it passed
+# 17/40 against 25/40 for the word alone (it is twice as fast per take). GRETA_CARRIER=1 turns it on.
+CARRIER = os.environ.get("GRETA_CARRIER", "0") == "1"
+LONG = 14                                         # lines longer than this (words) are said in parts
+
+
+def split_long(text):
+    """Long lines drift (repeated or skipped words). Split at commas/semicolons into parts of 4+ words."""
+    words = text.split()
+    if len(words) <= LONG:
+        return [text]
+    parts, cur = [], ""
+    for piece in re.split(r"(?<=[,;:])\s+", text):
+        cur = f"{cur} {piece}".strip() if cur else piece
+        if len(cur.split()) >= 4 and len(cur.split()) >= len(words) // 3:
+            parts.append(cur); cur = ""
+    if cur:
+        if parts and len(cur.split()) < 4:
+            parts[-1] += " " + cur
+        else:
+            parts.append(cur)
+    return parts
+
+
+def say_line(eng, text, voice):
+    """A sentence, in parts if it's long, joined with a short breath (180 ms)."""
+    parts = split_long(text)
+    if len(parts) == 1:
+        return trim(eng.say(text, voice, temperature=0.8))
+    gap = np.zeros(int(0.18 * SR), np.float32)
+    out = []
+    for i, part in enumerate(parts):
+        out += ([gap] if i else []) + [trim(eng.say(part, voice, temperature=0.8))]
+    return np.concatenate(out)
 
 
 def write_index():
@@ -68,17 +120,28 @@ def main():
     t0 = time.time()
 
     if de:
-        eng = Engine("de")
+        eng = Engine("de", slots=SLOTS)
         try:
             words = [i for i in de if single_word(i["text"]) and not i["alt"]]
             rest = [i for i in de if i not in words]
-            for n, it in enumerate(rest, 1):
-                save(it, trim(eng.say(it["text"], "emily" if it["alt"] else "greta", temperature=0.8)))
-                if n % 50 == 0:
-                    print(f"German sentences {n}/{len(rest)}  ({time.time() - t0:.0f}s)", flush=True)
+            done = [0]
+
+            def one(it):
+                save(it, say_line(eng, it["text"], "emily" if it["alt"] else greta_for(it["text"])))
+                done[0] += 1
+                if done[0] % 50 == 0:
+                    print(f"German sentences {done[0]}/{len(rest)}  ({time.time() - t0:.0f}s)", flush=True)
+            with ThreadPoolExecutor(SLOTS) as pool:
+                list(pool.map(one, rest))
             for k in range(0, len(words), 120):  # word batches keep each Whisper run a sensible size
                 chunk = words[k:k + 120]
-                best, report = clean_words(eng, [i["text"] for i in chunk], "greta", TMP / "words")
+                texts = [i["text"] for i in chunk]
+                # first inside a carrier sentence ("Das Wort ist: Puls."), cut out; the word alone for the rest
+                best, report = carrier_words(eng, texts, "greta", TMP / "words") if CARRIER else ({t: None for t in texts}, [])
+                left = [t for t in texts if best.get(t) is None]
+                if left:
+                    best2, report2 = clean_words(eng, left, "greta", TMP / "words")
+                    best.update(best2); report += report2
                 for it in chunk:
                     save(it, best[it["text"]])
                 flagged = [r for r in report if "best guess" in r]

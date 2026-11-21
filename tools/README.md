@@ -68,6 +68,16 @@ After changing lesson text, regenerate the audio in this order (run Python from 
 
 Recordings come from Lingua Libre via `fetch_ll_list.py` → `ll_exact.py` → `ll_download.py`, and from Wiktionary's older `De-<word>` files via `wikt.py list` → `match` → `download` → `check` → `match` again (all polite and rate-limited). `check` has Whisper listen to each new Wiktionary file; files it hears as a different word are listed in `<work>/wikt_reject.json` and skipped, so they get a generated clip instead. Card words (Core deck and level lists) only get Greta clips with `gen_all.py --core`, after the real recordings are matched.
 
+### How Greta reads
+
+- **Text clean-up** (`tts/textnorm.py`, applied to all German text in `langtts.py`): numbers, money, times, years, abbreviations, acronyms (spelled with German letter names), symbols, gaps and notes in brackets become words. Run `textnorm.py` to see the test cases. The clip is still filed under the original text.
+- **Pronunciation dictionary** (`tts/lexicon.json`): respellings for words Greta mispronounces, applied to whole words only. Candidates go in `lexicon_candidates.json`; `ab_lexicon.py` A/B-tests them, scored by Whisper, with takes saved for listening. Only winners belong in `lexicon.json`: of 47 loanwords tested, 10 helped (Team, Deadline, Cloud, Recycling …).
+- **Speed:** `gen_all.py` sends 4 requests at once (`GRETA_SLOTS`); 4 was 2.3× faster than 1 on the RX 5700 XT.
+- **Long lines** (over 14 words) are read in parts split at commas and joined with a short breath, which avoids drift (repeated or skipped words).
+- **Tried and not used** (scripts kept in case a better model changes this):
+  - `carrier.py` says single words inside "Das Wort ist: …" and cuts them out. It passed 17/40 against 25/40 for the word alone, so it's off unless `GRETA_CARRIER=1`.
+  - `make_refs.py` makes question and exclamation references. They didn't change the melody (this model takes little intonation from its reference), so they aren't used.
+
 ### Listening to the audio yourself
 
 ```

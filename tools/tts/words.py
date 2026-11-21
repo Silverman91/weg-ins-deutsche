@@ -10,6 +10,7 @@ The shortest passing take wins. If none pass, the take closest to the expected l
 import json
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -80,8 +81,10 @@ def clean_words(eng, words, voice, tmp, takes=4, rounds=3, temperature=0.8):
         for w in todo:
             spoken = norm(w)
             text = re.sub(r"[^\wÄÖÜäöüß-]", "", w) + "."   # one word, a plain full stop: no comma/colon run-ons
-            for k in range(rnd * takes, (rnd + 1) * takes):
-                wav = trim(eng.say(text, voice, seed=11 + 97 * k, temperature=temperature, tries=1))
+            ks = list(range(rnd * takes, (rnd + 1) * takes))
+            with ThreadPoolExecutor(getattr(eng, "slots", 1)) as pool:   # takes in parallel, one per server slot
+                wavs = list(pool.map(lambda k: trim(eng.say(text, voice, seed=11 + 97 * k, temperature=temperature, tries=1)), ks))
+            for k, wav in zip(ks, wavs):
                 p = tmp / f"{voice}_{spoken}_{k}.wav"
                 sf.write(p, wav, SR)
                 cands.setdefault(w, []).append((p, wav))
