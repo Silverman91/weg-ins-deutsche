@@ -60,6 +60,22 @@ const shell = (sw.match(/\[([^\]]*\.js[^\]]*)\]/) || [])[1] || "";
 for (const m of shell.matchAll(/"([^"]+)"/g)) { const f = m[1].replace(/^\.\//, ""); if (f && !fs.existsSync(path.join(APP, f || "index.html"))) err(`sw.js caches ${m[1]}, which does not exist`); }
 for (const f of fs.readdirSync(APP).filter(f => /\.js$/.test(f) && f !== "sw.js")) if (!html.includes(f)) warn(`${f} is not loaded by index.html`);
 
+// 5. free materials and lesson links (resources.js)
+const RES = ctx.RESOURCES || [], KINDS = ctx.RESOURCE_KINDS || {}, LINKS = ctx.LESSON_LINKS || {}, resIds = new Set(RES.map(r => r.id));
+for (const r of RES) {
+  if (!/^https:\/\//.test(r.url)) err(`resource ${r.id} has a non-https link: ${r.url}`);
+  if (!KINDS[r.kind]) err(`resource ${r.id} has an unknown kind: ${r.kind}`);
+  if (!r.lv.length || r.lv.some(l => !["A1", "A2", "B1", "B2", "C1"].includes(l))) err(`resource ${r.id} has bad levels: ${r.lv}`);
+}
+for (const [id, links] of Object.entries(LINKS)) {
+  if (!LESSONS[id]) err(`LESSON_LINKS has a link for unknown lesson ${id}`);
+  for (const x of links) {
+    const ref = x.length === 1 ? x[0] : x[2];
+    if (!resIds.has(ref)) err(`lesson ${id} links to unknown resource ${ref}`);
+    if (x.length > 1 && !/^https:\/\//.test(x[1])) err(`lesson ${id} has a non-https link: ${x[1]}`);
+  }
+}
+
 // report
 const n = ids.length, segs = items.filter(i => !i.core).length, core = items.filter(i => i.core).length;
 console.log(`${n} lessons · ${segs} spoken lines · ${core} Core card words · ${listed.size} clips (${index.credits.length} credited speakers)`);

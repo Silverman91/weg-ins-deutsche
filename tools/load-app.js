@@ -3,7 +3,7 @@
 const vm = require("vm"), fs = require("fs"), path = require("path");
 
 const FILES = ["course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js",
-  "lessons-7.js", "content.js", "glosses.js", "core-words.js", "app.js"];
+  "lessons-7.js", "content.js", "stories.js", "resources.js", "glosses.js", "core-words.js", "level-words.js", "memory.js", "word-topics.js", "app.js"];
 
 function loadApp(appDir) {
   const el = () => new Proxy({ style: {}, classList: { toggle() {} }, dataset: {} }, {
@@ -45,9 +45,11 @@ function spokenSegments(ctx) {
   // German lines spoken by buttons outside the narrated lessons: chat drills, stories, the voice test.
   add("de", 0, "Hallo! Schön, dass du Deutsch lernst.", "voice test");
   for (const D of ctx.$get("DRILLS")) for (const t of D.turns) { add("de", 0, t[0], "drill " + D.id); add("de", 0, t[3], "drill " + D.id); }
-  for (const st of ctx.$get("STORIES")) for (const p of st.p) add("de", 0, p[0], "story " + st.id);
+  for (const st of ctx.$get("STORIES")) for (const t of st.audio || st.p.map(p => p[0])) add("de", 0, t, "story " + st.id);
   // Core 2,000 cards: the Listen button plays the word without its plural ending ("der Mann, -¨er" -> "der Mann").
   for (const w of ctx.CORE_WORDS || []) add("de", 0, cleanWord(w[0]), "core card", { core: true });
+  // Level word cards (A1–C1) play the same way.
+  for (const [lv, ws] of Object.entries(ctx.LEVEL_WORDS || {})) for (const w of ws) add("de", 0, cleanWord(w[0]), lv + " word card", { core: true });
   return { ids, lessons, items: [...uniq.values()] };
 }
 const cleanWord = w => String(w).replace(/,\s*-.*$/, "").replace(/\s*\((pl\.|m\/f|f|m)\)/g, "").replace(/ \/ /g, ", ");

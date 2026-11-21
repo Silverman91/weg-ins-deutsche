@@ -19,8 +19,11 @@ def urls(titles):
     out = {}
     for k in range(0, len(titles), 50):
         r = requests.get(API, headers=UA, timeout=60, params={"action": "query", "titles": "|".join(titles[k:k + 50]),
-                                                               "prop": "imageinfo", "iiprop": "url|extmetadata", "format": "json"})
+                                                               "prop": "imageinfo", "iiprop": "url|extmetadata", "format": "json",
+                                                               "maxlag": "5"})
         r.raise_for_status()
+        if r.elapsed.total_seconds() > 1:  # Wikimedia robot policy: after a slow API request, wait 5 s
+            time.sleep(5)
         norm = {n["to"]: n["from"] for n in r.json()["query"].get("normalized", [])}
         for p in r.json()["query"]["pages"].values():
             ii = (p.get("imageinfo") or [{}])[0]

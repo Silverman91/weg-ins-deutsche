@@ -1,6 +1,7 @@
 """Listening check for Greta's German sentences (single words are already checked when they are made).
 
 Usage: audit_sentences.py check   Whisper transcribes every generated German clip of 2+ words -> sentence_audit.json
+       audit_sentences.py check --new   only clips not checked before (new lines), added to sentence_audit.json
        audit_sentences.py fix     re-makes clips that scored low (up to 3 new takes each, keeps the best) and rechecks
 Score = how many words Whisper heard in the right order (0..1). Real human recordings are not checked.
 Below 0.75 usually means a skipped, repeated or garbled word; numbers and spelling variants cause a few false alarms.
@@ -77,7 +78,9 @@ def check(items):
 
 
 def cmd_check():
-    res = check(generated())
+    """`check --new` only listens to clips that aren't in sentence_audit.json yet and adds them to it."""
+    old = json.loads(OUT.read_text(encoding="utf-8")) if "--new" in sys.argv and OUT.exists() else {}
+    res = {**old, **check([i for i in generated() if i["h"] not in old])}
     OUT.write_text(json.dumps(res, ensure_ascii=False, indent=0), encoding="utf-8")
     report(res)
 
@@ -85,7 +88,7 @@ def cmd_check():
 def report(res):
     low = sorted((v for v in res.values() if v["score"] < LIMIT), key=lambda v: v["score"])
     print(f"{len(res)} sentences checked, {len(low)} below {LIMIT}")
-    for v in low[:int(sys.argv[2]) if len(sys.argv) > 2 else 60]:
+    for v in low[:next((int(a) for a in sys.argv[2:] if a.isdigit()), 60)]:
         print(f"  {v['score']:.2f}  {v['text']}  | heard: {v['heard']}")
 
 

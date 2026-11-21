@@ -1,7 +1,7 @@
 {
   "name": "Weg ins Deutsche",
   "id": "io.github.silverman91.weginsdeutsche",
-  "version": "1.0",
+  "version": "1.1",
   "web": "..",
   "start": "index.html",
   "icon": "icon-512.png",

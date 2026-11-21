@@ -15,6 +15,10 @@ rec = load()
 pref = ["Natschoba", "Sebastian Wallroth", "Lucas Werkmeister"]
 pref += [s for s in sorted(rec, key=lambda s: -len(rec[s])) if s not in pref]
 items = [i for i in json.loads((ROOT / lines).read_text(encoding="utf-8"))["items"] if i["lang"] == "de" and not i["alt"]]
+# recordings marked bad in the audio review page (tools/audio-review.js) are skipped; they get a generated clip
+rej = ROOT / "ll_reject.json"
+rejected = set(json.loads(rej.read_text(encoding="utf-8"))) if rej.exists() else set()
+items = [i for i in items if i["h"] not in rejected]
 key = lambda s: re.sub(r"[.,:;!?…]+$", "", s.strip())  # noqa: E731
 hits, by = {}, {}
 for it in items:

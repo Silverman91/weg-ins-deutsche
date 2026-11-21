@@ -42,7 +42,10 @@ def save(item, wav):
 
 def write_index():
     have = sorted(p.stem for p in CLIPS.glob("*.ogg"))
-    idx = {"v": 1, "clips": have, "voices": {
+    path = APP / "audio" / "index.json"
+    old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    # keep everything else in the index (speaker credits, the list of changed clips phones must re-download)
+    idx = {**old, "v": 1, "clips": have, "voices": {
         "en": "Emily (NeuTTS-2E by Neuphonic, Apache-2.0)",
         "de": "Greta (NeuTTS Nano German by Neuphonic, NeuTTS Open License v1.0)"}}
     (APP / "audio" / "index.json").write_text(json.dumps(idx, separators=(",", ":")), encoding="utf-8")

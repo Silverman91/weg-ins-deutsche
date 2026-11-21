@@ -43,7 +43,16 @@ _QUOTES = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"', "„": 
 
 
 def norm_text(t):
-    return unicodedata.normalize("NFKC", str(t).translate(_QUOTES)).strip()
+    t = unicodedata.normalize("NFKC", str(t).translate(_QUOTES))
+    # Double quotes and dashes are not spoken, and the speech model turns them into stray syllables
+    # ("gesagt: Tat Jonas"): drop the quotes, and make a dash between words a short pause.
+    t = t.replace('"', "")
+    # Emojis are read out by name ("Gesicht mit lachenden Augen"): drop them and their joiners/variants.
+    t = "".join(ch for ch in t if unicodedata.category(ch) not in ("So", "Cs")
+                and ord(ch) not in (0x200D, 0xFE0F) and not 0x1F3FB <= ord(ch) <= 0x1F3FF)  # joiner, variant, skin tones
+    t = re.sub(r"(?<=[.,!?:;])\s+[–—]\s+", " ", t)
+    t = re.sub(r"\s+[–—]\s+", ", ", t)
+    return re.sub(r"\s{2,}", " ", t).strip()
 
 
 class Engine:

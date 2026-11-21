@@ -95,6 +95,8 @@ nav.bottom button{font-size:10px}
 .g-word{font-size:26px;font-family:var(--f-display)}
 .g-q{font-size:20px;line-height:1.4}
 .g-blank{background:var(--saffron-soft);padding:0 6px;border-radius:6px}
+.g-blank.ok{background:var(--ok-soft);color:var(--ok)}
+.g-blank.no{background:var(--bad-soft);color:var(--bad)}
 .g-result h2{font-size:40px}
 @media (prefers-reduced-motion: reduce){.g-fall{animation-timing-function:steps(4)}}
 `;
@@ -134,9 +136,14 @@ const html = `<!doctype html>
 <script src="lessons-6.js"></script>
 <script src="lessons-7.js"></script>
 <script src="content.js"></script>
+<script src="stories.js"></script>
+<script src="resources.js"></script>
 <script src="games.js"></script>
 <script src="glosses.js"></script>
 <script src="core-words.js"></script>
+<script src="level-words.js"></script>
+<script src="memory.js"></script>
+<script src="word-topics.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
@@ -144,7 +151,7 @@ const html = `<!doctype html>
 fs.writeFileSync(path.join(out, "index.html"), html);
 
 // 3) manifest and service worker
-const files = ["./", "index.html", "course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js", "lessons-7.js", "content.js", "games.js", "glosses.js", "core-words.js", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const files = ["./", "index.html", "course.js", "lessons-1.js", "lessons-2.js", "lessons-3.js", "lessons-4.js", "lessons-5.js", "lessons-6.js", "lessons-7.js", "content.js", "stories.js", "resources.js", "games.js", "glosses.js", "core-words.js", "level-words.js", "memory.js", "word-topics.js", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 fs.writeFileSync(path.join(out, "manifest.webmanifest"), JSON.stringify({
   name: "Weg ins Deutsche", short_name: "Deutsch", description: "Learn German offline, from zero to C1.",
   start_url: "./", scope: "./", display: "standalone", orientation: "portrait",

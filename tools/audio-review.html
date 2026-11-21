@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio review</title>
+<style>
+:root{--bg:#f6f4f2;--card:#fff;--ink:#1f1b19;--muted:#6f6762;--line:#e4dfdb;--acc:#9b2c2c;--ok:#2f7d4f;--okbg:#e3f2e8;--bad:#b03a2e;--badbg:#f8e2df;--use:#2b5fa8;--usebg:#e1ebf8;--sel:#fff4d6}
+@media (prefers-color-scheme:dark){:root{--bg:#171413;--card:#221e1c;--ink:#efe9e5;--muted:#a59c96;--line:#38312e;--acc:#f08a7e;--ok:#7fcf9c;--okbg:#1f3328;--bad:#f19a8f;--badbg:#3b2421;--use:#8db6ef;--usebg:#1e2a3c;--sel:#3a3120}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px;display:grid;gap:10px}
+h1{margin:0;font-size:20px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{border:1px solid var(--line);background:var(--card);color:inherit;border-radius:99px;padding:5px 11px;font:inherit;font-size:13px;cursor:pointer}
+.chip[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:var(--card)}
+.chip small{opacity:.7}
+input[type=search]{flex:1 1 220px;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:inherit;font:inherit}
+.stat{font-size:13px;color:var(--muted)}
+main{max-width:980px;margin:0 auto;padding:12px 16px 80px}
+.item{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.item.sel{outline:2px solid var(--acc);background:var(--sel)}
+.item.d-ok{border-left:5px solid var(--ok)}.item.d-remake{border-left:5px solid var(--bad)}.item.d-use{border-left:5px solid var(--use)}
+.play{width:42px;height:42px;border-radius:50%;border:0;background:var(--acc);color:var(--card);font-size:16px;cursor:pointer}
+.play.alt{width:30px;height:30px;font-size:11px;background:var(--muted)}
+.t b{font-size:16px}
+.meta{font-size:12px;color:var(--muted)}
+.heard{font-size:13px}
+.score{font-family:ui-monospace,monospace;font-size:12px;padding:1px 6px;border-radius:5px;background:var(--badbg);color:var(--bad)}
+.score.good{background:var(--okbg);color:var(--ok)}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.acts button{border:1px solid var(--line);background:var(--card);color:inherit;border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer}
+.acts button.on.ok{background:var(--okbg);border-color:var(--ok);color:var(--ok)}
+.acts button.on.remake{background:var(--badbg);border-color:var(--bad);color:var(--bad)}
+.acts button.on.use{background:var(--usebg);border-color:var(--use);color:var(--use)}
+.pager{display:flex;gap:8px;justify-content:center;margin:14px 0}
+.pager button{border:1px solid var(--line);background:var(--card);color:inherit;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.help{font-size:12px;color:var(--muted)}
+kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--card)}
+@media (max-width:640px){.item{grid-template-columns:auto 1fr}.acts{grid-column:1/-1;justify-content:flex-start}}
+</style>
+</head>
+<body>
+<header>
+  <div class="row" style="justify-content:space-between"><h1>Audio review</h1><span class="stat" id="stat"></span></div>
+  <div class="row" id="groups"></div>
+  <div class="row" id="sources"></div>
+  <div class="row"><input type="search" id="q" placeholder="Search text or what Whisper heard…"><button class="chip" id="undecided" aria-pressed="true">Not reviewed yet</button><button class="chip" id="auto" aria-pressed="true">Play next automatically</button></div>
+  <div class="help"><kbd>Space</kbd> play · <kbd>↓</kbd>/<kbd>J</kbd> next · <kbd>↑</kbd>/<kbd>K</kbd> back · <kbd>1</kbd> good · <kbd>2</kbd> re-make / don't use · <kbd>3</kbd> use it anyway (rejected recordings) · <kbd>G</kbd> hear Greta's version · <kbd>0</kbd> undo the last decision. Decisions save as you go; run <code>node tools/audio-review.js apply</code> afterwards.</div>
+</header>
+<main id="list"></main>
+<script>
+const GROUPS = [["rejected", "Rejected recordings"], ["low", "Low score"], ["cards", "Card words"], ["stories", "Story lines"], ["lessons", "Lessons"], ["drills", "Speak drills"], ["all", "Everything"]];
+const SOURCES = [["any", "Any source"], ["greta", "Greta"], ["ll", "Lingua Libre"], ["wikt", "Wiktionary"]];
+const PAGE = 100;
+let items = [], dec = {}, view = [], st = { group: "rejected", src: "any", q: "", undecided: true, page: 0, sel: 0, auto: true };
+const $ = id => document.getElementById(id), esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const audio = new Audio();
+const isLow = it => it.group !== "rejected" && it.score != null && it.score < 0.75 || !!it.note;
+const inGroup = (it, g) => g === "all" ? it.group !== "rejected" : g === "low" ? isLow(it) : it.group === g;
+const srcOf = it => it.src.startsWith("Lingua") ? "ll" : it.src.startsWith("Wiktionary") ? "wikt" : "greta";
+
+function filter() {
+  const q = st.q.trim().toLowerCase();
+  view = items.filter(it => inGroup(it, st.group) && (st.src === "any" || srcOf(it) === st.src) && (!st.undecided || !dec[key(it)])
+    && (!q || it.text.toLowerCase().includes(q) || String(it.heard || "").toLowerCase().includes(q)));
+  if (st.group === "low" || st.group === "rejected") view.sort((a, b) => (a.score ?? 1) - (b.score ?? 1));
+}
+const key = it => it.h; // one decision per clip
+function counts() {
+  $("groups").innerHTML = GROUPS.map(([g, l]) => { const n = items.filter(it => inGroup(it, g)).length, open = items.filter(it => inGroup(it, g) && !dec[key(it)]).length;
+    return `<button class="chip" data-g="${g}" aria-pressed="${st.group === g}">${l} <small>${open.toLocaleString()}${open !== n ? " / " + n.toLocaleString() : ""}</small></button>`; }).join("");
+  $("sources").innerHTML = SOURCES.map(([s, l]) => `<button class="chip" data-s="${s}" aria-pressed="${st.src === s}">${l}</button>`).join("");
+  const c = { ok: 0, remake: 0, use: 0 }; for (const v of Object.values(dec)) if (c[v.d] != null) c[v.d]++;
+  $("stat").textContent = `${c.ok} good · ${c.remake} re-make · ${c.use} use anyway`;
+}
+function draw() {
+  counts();
+  const start = st.page * PAGE, rows = view.slice(start, start + PAGE);
+  $("list").innerHTML = (view.length ? "" : `<p class="stat">Nothing left here. Pick another group, or untick "Not reviewed yet".</p>`) + rows.map((it, i) => { const d = (dec[key(it)] || {}).d, n = start + i;
+    const sc = it.score == null ? "" : `<span class="score ${it.score >= 0.75 ? "good" : ""}">${it.group === "rejected" ? "rejected" : Math.round(it.score * 100) + "%"}</span>`;
+    return `<div class="item ${n === st.sel ? "sel" : ""} ${d ? "d-" + d : ""}" data-i="${n}">
+      <div class="row"><button class="play" data-play="${n}" aria-label="Play">▶</button>${it.greta && it.url !== it.greta ? `<button class="play alt" data-greta="${n}" title="Greta's version">G</button>` : ""}</div>
+      <div class="t"><b>${esc(it.text)}</b> ${sc}<div class="meta">${esc(it.src)} · ${esc(it.where)}${it.note ? " · " + esc(it.note) : ""}</div>${it.heard != null ? `<div class="heard">Whisper heard: <i>${esc(it.heard) || "nothing"}</i></div>` : ""}</div>
+      <div class="acts"><button class="ok ${d === "ok" ? "on" : ""}" data-d="ok" data-n="${n}">✓ Good</button><button class="remake ${d === "remake" ? "on" : ""}" data-d="remake" data-n="${n}">${it.group === "rejected" ? "✗ Keep rejected" : srcOf(it) === "greta" ? "✗ Re-make" : "✗ Don't use"}</button>${it.group === "rejected" ? `<button class="use ${d === "use" ? "on" : ""}" data-d="use" data-n="${n}">✓ Use it</button>` : ""}</div></div>`; }).join("")
+    + (view.length > PAGE ? `<div class="pager"><button data-page="-1" ${st.page ? "" : "disabled"}>‹ Previous</button><span class="stat">${start + 1}–${Math.min(view.length, start + PAGE)} of ${view.length.toLocaleString()}</span><button data-page="1" ${start + PAGE < view.length ? "" : "disabled"}>Next ›</button></div>` : "");
+}
+function play(n, greta) { const it = view[n]; if (!it) return; const url = greta ? it.greta : it.url; if (!url) return; audio.src = url; audio.play().catch(() => {}); }
+function select(n, scroll = true) {
+  n = Math.max(0, Math.min(view.length - 1, n)); if (n < 0) return;
+  const pg = Math.floor(n / PAGE); st.sel = n; if (pg !== st.page) { st.page = pg; draw(); } else document.querySelectorAll(".item").forEach(e => e.classList.toggle("sel", +e.dataset.i === n));
+  if (scroll) { const e = document.querySelector(`.item[data-i="${n}"]`); if (e) e.scrollIntoView({ block: "center" }); }
+}
+async function decide(n, d) {
+  const it = view[n]; if (!it) return;
+  if (it.group !== "rejected" && d === "use") return;
+  if (it.group === "rejected" && d === "ok") d = "use"; // "good" on a rejected recording means: use it
+  const k = key(it), same = dec[k] && dec[k].d === d;
+  if (same || d === null) delete dec[k]; else { dec[k] = { d, text: it.text }; st.last = it; }
+  await fetch("/decide", { method: "POST", body: JSON.stringify({ h: it.h, d: same || d === null ? null : d, text: it.text }) });
+  if (st.undecided && dec[k]) { filter(); st.sel = Math.min(n, view.length - 1); draw(); if (st.auto) play(st.sel); select(st.sel); }
+  else { draw(); select(n + 1); if (st.auto) play(n + 1); }
+}
+// 0: take back the last decision and go back to that clip
+async function undo() {
+  const it = st.last; if (!it) return; st.last = null;
+  delete dec[key(it)]; await fetch("/decide", { method: "POST", body: JSON.stringify({ h: it.h, d: null, text: it.text }) });
+  filter(); const n = view.indexOf(it); draw(); if (n >= 0) select(n);
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) { const row = e.target.closest(".item"); if (row) select(+row.dataset.i, false); return; }
+  if (b.dataset.g) { st.group = b.dataset.g; st.page = 0; st.sel = 0; filter(); draw(); }
+  else if (b.dataset.s) { st.src = b.dataset.s; st.page = 0; st.sel = 0; filter(); draw(); }
+  else if (b.id === "undecided") { st.undecided = !st.undecided; b.setAttribute("aria-pressed", st.undecided); filter(); draw(); }
+  else if (b.id === "auto") { st.auto = !st.auto; b.setAttribute("aria-pressed", st.auto); }
+  else if (b.dataset.play) { select(+b.dataset.play, false); play(+b.dataset.play); }
+  else if (b.dataset.greta) { select(+b.dataset.greta, false); play(+b.dataset.greta, true); }
+  else if (b.dataset.d) decide(+b.dataset.n, b.dataset.d);
+  else if (b.dataset.page) { st.page += +b.dataset.page; st.sel = st.page * PAGE; draw(); window.scrollTo(0, 0); }
+});
+$("q").addEventListener("input", e => { st.q = e.target.value; st.page = 0; st.sel = 0; filter(); draw(); });
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase(), act = { " ": () => play(st.sel), arrowdown: () => select(st.sel + 1), j: () => select(st.sel + 1), arrowup: () => select(st.sel - 1), k: () => select(st.sel - 1),
+    1: () => decide(st.sel, "ok"), 2: () => decide(st.sel, "remake"), 3: () => decide(st.sel, "use"), 0: undo, g: () => play(st.sel, true) }[k];
+  if (act) { e.preventDefault(); act(); }
+});
+(async () => {
+  [items, dec] = await Promise.all([fetch("/items.json").then(r => r.json()), fetch("/decisions.json").then(r => r.json())]);
+  if (!items.some(it => it.group === "rejected")) st.group = "low";
+  filter(); draw();
+})();
+</script>
+</body>
+</html>

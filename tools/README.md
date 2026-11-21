@@ -15,6 +15,20 @@ Regenerates `course.js`, `index.html`, `sw.js`, `manifest.webmanifest` and the i
 
 Lesson content (`lessons-*.js`, `content.js`, `glosses.js`) and the app logic (`app.js`, `games.js`) are edited directly in the repo root. Run the build after changing any app file so the service worker gets a new cache version.
 
+## Word lists by level
+
+```
+node tools/level-words.js
+```
+
+Builds `level-words.js`, the A1–C1 word lists on the Cards screen, from the hand-written parts in `levels/`. A1–B1 hold the words on the Goethe-Institut A1/A2/B1 lists that the Core deck and the lessons don't teach. B2 and C1 add the next most useful words by theme, bringing the total to about 7,600 words. Words already in the Core deck, a lesson, or a lower level are dropped automatically. `levels/words-zz-moves.js` moves words written down in a themed part to the level where learners need them. Add `-v` to see what was dropped.
+
+```
+node tools/word-topics.js
+```
+
+Builds `word-topics.js`, which gives every word (Core deck, level lists, lessons) a level and a topic for the dictionary on the Cards screen. Level-list words written under a themed heading in `levels/` ("// health and body") take that heading's topic. Everything else is sorted by keywords in its English meaning, and words without a match go to "Everyday words". Core words take their level from `core-levels.json`, made once from the Goethe-Institut A1/A2/B1 lists; words on none of them are levelled by how common they are. Run it after `level-words.js` or any change to the word lists. Add `-v` to see a sample of each topic.
+
 ## Check everything
 
 ```
@@ -52,7 +66,20 @@ After changing lesson text, regenerate the audio in this order (run Python from 
 
 5. `node tools/audio-updates.js` (just before committing) lists clips whose sound changed but whose file name did not, so phones that already downloaded them fetch the new version. `apply_ll.py` re-encodes every real recording with a new stream ID but the same sound; restore those with `git checkout` first so only real changes are listed and pushed.
 
-Recordings come from Lingua Libre via `fetch_ll_list.py` → `ll_exact.py` → `ll_download.py`, and from Wiktionary's older `De-<word>` files via `wikt.py list` → `match` → `download` (all polite and rate-limited). Wiktionary clips that Whisper hears as a different word are listed in `<work>/wikt_reject.json` and skipped.
+Recordings come from Lingua Libre via `fetch_ll_list.py` → `ll_exact.py` → `ll_download.py`, and from Wiktionary's older `De-<word>` files via `wikt.py list` → `match` → `download` → `check` → `match` again (all polite and rate-limited). `check` has Whisper listen to each new Wiktionary file; files it hears as a different word are listed in `<work>/wikt_reject.json` and skipped, so they get a generated clip instead. Card words (Core deck and level lists) only get Greta clips with `gen_all.py --core`, after the real recordings are matched.
+
+### Listening to the audio yourself
+
+```
+node tools/audio-review.js
+```
+
+Opens a review page at http://localhost:5175 for listening to what the app plays and catching what the automatic checks miss. Groups:
+- Wiktionary recordings Whisper rejected (Whisper often mishears single words, so many are fine);
+- Greta clips that scored low;
+- card words, story lines, lessons and drills, with their source.
+
+Keys: `Space` plays, `J`/`K` move, `1` good, `2` re-make (or stop using a recording), `3` use a rejected recording anyway, `G` plays Greta's version, `0` undoes the last decision. Decisions save to `<work>/audio_review.json` as you go. Afterwards, `node tools/audio-review.js apply` puts accepted recordings back, adds rejected ones to `ll_reject.json`/`wikt_reject.json`, deletes Greta clips to be made again, and prints the commands to rebuild the audio. Don't run `apply` while `wikt.py check` is running.
 
 Helpers:
 

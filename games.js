@@ -17,6 +17,10 @@
  *   api.level()           0..4 for A1..C1 (difficulty)
  *   api.say(text)         plays a German word/sentence (natural recording if available)
  *   api.cleanWord(v)      "der Tisch, -e" -> "der Tisch"
+ *   api.cards()           your flashcards [{de, en, b}] (b = box 0–7: low means you find it hard)
+ *
+ * unlock: null means no lesson is needed (games that play your flashcards). W.vocab and W.nouns mix lesson
+ * words with your cards and mark hard ones weak; the app picks rounds with W.smartPick, about half weak words.
  */
 (function () {
   "use strict";
@@ -27,21 +31,41 @@
   const W = window.WIDGames = { register: g => games.push(g), list: () => games, shuffle, pick, esc };
 
   /* ---------- shared content builders (used by several games) ---------- */
-  W.nouns = api => {               // [{art, noun, en, say}] from vocabulary with der/die/das
-    const out = [], seen = new Set();
-    for (const id of api.done()) for (const v of api.lesson(id).v) {
-      if (/\(pl\.\)/.test(v[0])) continue;
-      const parts = v[0].replace(/,\s*-.*$/, "").split(/\s*\/\s*/), ens = String(v[1]).split(/\s*\/\s*/);
+  // Words come from finished lessons AND your flashcards (Core deck, level lists, your own cards), so the games
+  // grow with the words you're learning. Cards you find hard (box 0–1) are marked weak: smartPick shows them more.
+  const words = api => {            // [[German as written, English, weak]]
+    const out = [];
+    for (const id of api.done()) for (const v of api.lesson(id).v) out.push([v[0], v[1], false]);
+    for (const c of api.cards ? api.cards() : []) out.push([c.de, c.en, (c.b || 0) < 2]);
+    return out;
+  };
+  W.nouns = api => {               // [{art, noun, en, say, weak}] from vocabulary with der/die/das
+    const out = [], seen = new Map();
+    for (const [de, en, weak] of words(api)) {
+      if (/\(pl\.\)/.test(de)) continue;
+      const parts = de.replace(/,\s*-.*$/, "").split(/\s*\/\s*/), ens = String(en).split(/\s*\/\s*/);
       parts.forEach((p, k) => { const m = p.trim().match(/^(der|die|das)\s+([A-ZÄÖÜ][\wäöüß-]*)$/);
-        if (m && !seen.has(m[2])) { seen.add(m[2]); out.push({ art: m[1], noun: m[2], en: ens[k] || ens[0], say: `${m[1]} ${m[2]}` }); } });
+        if (!m) return;
+        if (seen.has(m[2])) { if (weak) seen.get(m[2]).weak = true; return; }
+        const it = { art: m[1], noun: m[2], en: ens[k] || ens[0], say: `${m[1]} ${m[2]}`, weak };
+        seen.set(m[2], it); out.push(it); });
     }
     return out;
   };
-  W.vocab = api => {                // [{de, en}] all vocabulary from finished lessons
-    const out = [], seen = new Set();
-    for (const id of api.done()) for (const v of api.lesson(id).v) { const de = api.cleanWord(v[0]); if (!seen.has(de)) { seen.add(de); out.push({ de, en: v[1] }); } }
+  W.vocab = api => {                // [{de, en, full, weak}] all vocabulary from finished lessons and cards
+    const out = [], seen = new Map();
+    for (const [full, en, weak] of words(api)) { const de = api.cleanWord(full);
+      if (seen.has(de)) { if (weak) seen.get(de).weak = true; continue; }
+      const it = { de, en, full, weak }; seen.set(de, it); out.push(it); }
     return out;
   };
+  // A round: about half hard words when there are any, the rest at random.
+  W.smartPick = (pool, n) => {
+    const weak = shuffle(pool.filter(x => x.weak)).slice(0, Math.ceil(n / 2)), rest = shuffle(pool.filter(x => !weak.includes(x)));
+    return shuffle(weak.concat(rest.slice(0, n - weak.length)));
+  };
+  const fold = s => String(s).toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
+  W.fold = fold;
   W.sentences = api => {            // [{de, en}] example + dialogue sentences, 3–10 words
     const out = [];
     for (const id of api.done()) { const L = api.lesson(id);
@@ -57,7 +81,7 @@
 
   /* ---------- 1. Der-Die-Das Dash ---------- */
   W.register({
-    id: "dash", name: "Der-Die-Das Dash", icon: "🎯", skill: "Noun genders", unlock: "a1-02", minItems: 6,
+    id: "dash", name: "Der-Die-Das Dash", icon: "🎯", skill: "Noun genders", unlock: null, minItems: 6,
     blurb: "A noun falls. Tap its article before it lands. Gets faster as you go.",
     pool: W.nouns, round: api => 12 + 2 * api.level(),
     play(el, it, api, answer, ctx) {
@@ -103,7 +127,7 @@
 
   /* ---------- 3. Listen & Tap ---------- */
   W.register({
-    id: "listen", name: "Listen & Tap", icon: "👂", skill: "Listening", unlock: "a0-2", minItems: 6,
+    id: "listen", name: "Listen & Tap", icon: "👂", skill: "Listening", unlock: null, minItems: 6,
     blurb: "Hear a German word and pick what it means.",
     pool: W.vocab, round: () => 12,
     play(el, it, api, answer, ctx) {
@@ -138,6 +162,167 @@
         if (/^[A-ZÄÖÜ]/.test(filled) && !/\?$/.test(it.q.trim()) || /[.!]$/.test(filled)) api.say(filled.replace(/\s*\(.*?\)\s*$/, ""));
         setTimeout(() => answer(ok, null), ok ? 1100 : 2400);
       }));
+    },
+  });
+
+  /* ---------- 5. Match Pairs ---------- */
+  const short = en => String(en).split(/[;(]/)[0].trim();
+  W.register({
+    id: "pairs", name: "Match Pairs", icon: "🔗", skill: "Vocabulary", unlock: null, minItems: 2,
+    blurb: "Tap a German word, then its meaning. Uses your flashcards, with the words you find hard more often.",
+    pool: api => {  // one puzzle = one board of 4–6 pairs with different meanings
+      const k = Math.min(6, 4 + api.level()), boards = [];
+      let words = W.smartPick(W.vocab(api).filter(w => w.de.length <= 22 && short(w.en).length <= 26 && !/…/.test(w.de)), 60);
+      while (words.length >= k) {
+        const board = [], used = new Set();
+        words = words.filter(w => { const e = short(w.en).toLowerCase(); if (board.length < k && !used.has(e)) { used.add(e); board.push(w); return false; } return true; });
+        if (board.length < k) break;
+        boards.push({ board, weak: board.some(w => w.weak) });
+      }
+      return boards;
+    },
+    round: () => 3,
+    play(el, it, api, answer) {
+      const de = shuffle(it.board.map((w, i) => ({ i, t: w.de }))), en = shuffle(it.board.map((w, i) => ({ i, t: short(w.en) })));
+      el.innerHTML = `<p class="g-hint">Match each German word with its meaning.</p>
+        <div class="g-pairs"><div>${de.map(x => `<button class="opt" data-de="${x.i}">${esc(x.t)}</button>`).join("")}</div>
+        <div>${en.map(x => `<button class="opt" data-en="${x.i}">${esc(x.t)}</button>`).join("")}</div></div>`;
+      let sel = null, left = it.board.length, misses = 0, missed = null;
+      const mark = (b, cls) => { b.classList.add(cls); setTimeout(() => b.classList.remove(cls), 600); };
+      el.querySelectorAll("[data-de]").forEach(b => b.addEventListener("click", () => {
+        el.querySelectorAll("[data-de]").forEach(x => x.classList.remove("sel")); sel = b; b.classList.add("sel"); api.say(it.board[+b.dataset.de].de); }));
+      el.querySelectorAll("[data-en]").forEach(b => b.addEventListener("click", () => {
+        if (!sel) return;
+        const i = +sel.dataset.de;
+        if (+b.dataset.en === i) {
+          [sel, b].forEach(x => { x.classList.remove("sel"); x.classList.add("right"); x.disabled = true; }); sel = null;
+          if (--left === 0) setTimeout(() => answer(misses <= 1, missed), 700);
+        } else { misses++; missed = missed || it.board[i].de; mark(b, "wrong"); mark(sel, "wrong"); }
+      }));
+    },
+  });
+
+  /* ---------- 6. Pick the German ---------- */
+  // Wrong answers look like the right one: nouns with nouns (and their article), verbs with verbs, the rest together.
+  const kind = de => /^(der|die|das) /.test(de) ? "noun" : /^(sich )?[a-zäöüß]+(en|ern|eln)$/.test(de) ? "verb" : /\s/.test(de) ? "phrase" : "other";
+  W.register({
+    id: "choose", name: "Pick the German", icon: "🔤", skill: "Vocabulary", unlock: null, minItems: 8,
+    blurb: "An English word and four German ones. Tap the right one. The wrong ones are the same kind of word, so look closely.",
+    pool: api => W.vocab(api).filter(w => w.de.length <= 30 && short(w.en).length <= 40 && !/[…]/.test(w.de)),
+    round: api => 10 + 2 * api.level(),
+    play(el, it, api, answer, ctx) {
+      const k = kind(it.de), mine = short(it.en).toLowerCase();
+      const fits = w => w !== it && w.de !== it.de && short(w.en).toLowerCase() !== mine;
+      let wrong = pick(ctx.pool.filter(w => fits(w) && kind(w.de) === k), 3);
+      if (wrong.length < 3) wrong = wrong.concat(pick(ctx.pool.filter(w => fits(w) && !wrong.includes(w)), 3 - wrong.length));
+      const opts = shuffle([it].concat(wrong));
+      el.innerHTML = `<p class="g-hint">Which German word means…</p><p class="g-q">${esc(short(it.en))}</p>
+        <div class="opts">${opts.map((o, i) => `<button class="opt" data-o="${i}">${esc(o.de)}</button>`).join("")}</div>`;
+      el.querySelectorAll("[data-o]").forEach(b => b.addEventListener("click", () => {
+        const o = opts[+b.dataset.o], ok = o === it;
+        el.querySelectorAll("[data-o]").forEach(x => { x.disabled = true; if (opts[+x.dataset.o] === it) x.classList.add("right"); });
+        if (!ok) { b.classList.add("wrong"); el.insertAdjacentHTML("beforeend", `<div class="fb no">${esc(o.de)} means “${esc(short(o.en))}”.</div>`); }
+        api.say(it.de);
+        setTimeout(() => answer(ok, ok ? null : it.de), ok ? 900 : 2200);
+      }));
+    },
+  });
+
+  /* ---------- 7. Missing Word ---------- */
+  // Sentences from finished lessons and from lessons at your level or below. The gap prefers a word you're
+  // learning in your flashcards (hard ones first); the wrong choices share its ending and capital letter,
+  // so you need the meaning and the grammar, not just the shape.
+  const tokens = s => s.match(/[A-Za-zÄÖÜäöüß]+/g) || [];
+  W.clozes = api => {
+    const lv = api.level(), ids = new Set(api.done());
+    for (const l of api.all ? api.all() : []) if (l.lvl <= lv) ids.add(l.id);
+    const sents = [], seen = new Set();
+    for (const id of ids) { const L = api.lesson(id);
+      for (const [de, en] of L.x.concat(L.d.map(d => [d[1], d[2]]))) {
+        const n = de.split(/\s+/).length;
+        if (n >= 4 && n <= 14 && !/[„“"–()]/.test(de) && en && !seen.has(de)) { seen.add(de); sents.push({ de, en }); } } }
+    const mine = new Map(); // your card words (bare, lower case) -> {weak, de}
+    for (const w of W.vocab(api)) { const b = w.de.replace(/^(der|die|das|sich) /, "").toLowerCase();
+      if (!/\s/.test(b)) { const o = mine.get(b); mine.set(b, { weak: (o && o.weak) || w.weak, de: (o && o.de) || w.de }); } }
+    // wrong choices only from words in mid-sentence (a capital there means a noun) with 4+ letters
+    const bank = new Set();
+    for (const s of sents) for (const part of s.de.split(/[.!?:]\s+/)) tokens(part).slice(1).forEach(t => { if (t.length >= 4) bank.add(t); });
+    const bankList = [...bank];
+    const out = [];
+    for (const s of sents) {
+      const ts = tokens(s.de).filter((t, i) => t.length >= 4 && !(i === 0 && /^[A-ZÄÖÜ]/.test(t) && !mine.has(t.toLowerCase())));
+      if (!ts.length) continue;
+      const card = ts.filter(t => mine.has(t.toLowerCase()));
+      const gap = (card.find(t => mine.get(t.toLowerCase()).weak) || card[0] || ts.sort((a, b) => b.length - a.length)[0]);
+      const cap = /^[A-ZÄÖÜ]/.test(gap), end = gap.slice(-2);
+      const like = bankList.filter(t => t !== gap && t.toLowerCase() !== gap.toLowerCase() && /^[A-ZÄÖÜ]/.test(t) === cap && !s.de.includes(t));
+      let wrong = pick(like.filter(t => t.endsWith(end)), 3);
+      if (wrong.length < 3) wrong = wrong.concat(pick(like.filter(t => !wrong.includes(t) && Math.abs(t.length - gap.length) <= 3), 3 - wrong.length));
+      if (wrong.length < 3) continue;
+      const m = mine.get(gap.toLowerCase());
+      out.push({ de: s.de, en: s.en, gap, wrong, weak: !!(m && m.weak), card: m && m.de });
+    }
+    return out;
+  };
+  W.register({
+    id: "cloze", name: "Missing Word", icon: "🕳️", skill: "Words in context", unlock: null, minItems: 6,
+    blurb: "A German sentence with a gap and four words to choose from. Stuck? Tap 💡 to see the English.",
+    pool: W.clozes,
+    round: api => 8 + 2 * api.level(),
+    play(el, it, api, answer) {
+      const opts = shuffle([it.gap].concat(it.wrong));
+      const i = it.de.search(new RegExp(`(^|[^A-Za-zÄÖÜäöüß])${it.gap}(?![A-Za-zÄÖÜäöüß])`));
+      const at = i < 0 ? it.de.indexOf(it.gap) : i + (i === 0 && it.de.startsWith(it.gap) ? 0 : 1);
+      const before = it.de.slice(0, at), after = it.de.slice(at + it.gap.length);
+      el.innerHTML = `<p class="g-q">${esc(before)}<span class="g-blank">_____</span>${esc(after)}</p>
+        <p class="g-hint" id="czTr" hidden>💡 ${esc(it.en)}</p>
+        <div class="opts">${opts.map((o, k) => `<button class="opt" data-o="${k}">${esc(o)}</button>`).join("")}</div>
+        <div class="btnrow"><button class="btn small ghost" data-hint>💡 Show the English</button></div>`;
+      el.querySelector("[data-hint]").addEventListener("click", e => { el.querySelector("#czTr").hidden = false; e.target.disabled = true; });
+      el.querySelectorAll("[data-o]").forEach(b => b.addEventListener("click", () => {
+        const ok = opts[+b.dataset.o] === it.gap;
+        el.querySelectorAll("[data-o]").forEach(x => { x.disabled = true; if (opts[+x.dataset.o] === it.gap) x.classList.add("right"); });
+        if (!ok) b.classList.add("wrong");
+        el.querySelector(".g-blank").textContent = it.gap; el.querySelector(".g-blank").classList.add(ok ? "ok" : "no");
+        el.querySelector("#czTr").hidden = false; el.querySelector("[data-hint]").remove();
+        api.say(it.de);
+        setTimeout(() => answer(ok, ok ? null : it.card || it.gap), ok ? 1300 : 2800);
+      }));
+    },
+  });
+
+  /* ---------- 8. Recall ---------- */
+  W.register({
+    id: "recall", name: "Recall", icon: "✍️", skill: "Remembering words", unlock: null, minItems: 6,
+    blurb: "See the meaning, type the German, with der/die/das for nouns. The hardest way to practise, and the one that makes words stick.",
+    pool: api => W.vocab(api).filter(w => w.de.split(/\s+/).length <= 3 && !/[…/]/.test(w.de) && short(w.en).length <= 40),
+    round: api => 8 + 2 * api.level(),
+    play(el, it, api, answer, ctx) {
+      const target = it.de.replace(/^der\/die /, "der "), bare = target.replace(/^(der|die|das|sich) /, "");
+      // other words in your set with the same meaning count too (employee: der Arbeitnehmer, der Mitarbeiter)
+      const same = W.vocab(api).filter(w => w.de !== it.de && short(w.en).toLowerCase() === short(it.en).toLowerCase()).map(w => w.de.replace(/^der\/die /, "der "));
+      const isNoun = /^(der|die|das) /.test(target);
+      let hints = api.level() >= 2 ? 0 : 1;
+      const hintText = () => hints === 0 ? "" : bare.split("").map((ch, i) => i < hints || ch === " " ? ch : "·").join("");
+      el.innerHTML = `<p class="g-q">${esc(short(it.en))}</p><p class="g-hint" id="rcHint">${isNoun ? "der / die / das + noun" : ""}${hints ? " · " + esc(hintText()) : ""}</p>
+        <div class="btnrow"><input class="field" id="rcIn" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1 1 200px" placeholder="German"><button class="btn primary" data-go>Check</button></div>
+        <div class="btnrow"><button class="btn small ghost" data-more>Show a letter</button></div><div id="rcFb"></div>`;
+      const inp = el.querySelector("#rcIn"); inp.focus();
+      el.querySelector("[data-more]").addEventListener("click", () => { hints = Math.min(bare.length, hints + 1);
+        el.querySelector("#rcHint").textContent = (isNoun ? "der / die / das + noun · " : "") + hintText(); inp.focus(); });
+      let done = false;
+      const check = () => {
+        if (done || !inp.value.trim()) return; done = true;
+        const got = fold(inp.value), want = fold(target);
+        const alt = same.find(w => fold(w) === got || (!/^(der|die|das) /.test(w) && fold(w.replace(/^sich /, "")) === got));
+        const ok = !!alt || got === want || (!isNoun && got === fold(bare)) || (/^der\/die /.test(it.de) && got === fold("die " + bare));
+        const noArticle = isNoun && got === fold(bare);
+        el.querySelector("#rcFb").innerHTML = `<div class="fb ${ok ? "ok" : "no"}">${ok ? "Richtig! " : noArticle ? "Almost: don't forget the article. " : ""}${alt ? `${esc(alt)} is right too. This card was ` : ""}<b>${esc(it.full.replace(/\s*\(.*?\)/g, ""))}</b></div>`;
+        inp.disabled = true; api.say(target);
+        setTimeout(() => answer(ok, ok ? null : it.de), ok ? 1100 : 2600);
+      };
+      el.querySelector("[data-go]").addEventListener("click", check);
+      inp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); check(); } });
     },
   });
 })();

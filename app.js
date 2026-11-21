@@ -422,7 +422,7 @@ function header() {
   $("overallPct").textContent = d + "/" + ALL.length;
   $("curLevel").textContent = level();
   const due = dueCards().length;
-  $("nav").innerHTML = NAV.map(([k, l, p]) => `<button data-nav="${k}" ${ui.view === k ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24">${p}</svg>${l}${k === "cards" && due ? `<span class="dot">${due > 99 ? "99+" : due}</span>` : ""}</button>`).join("");
+  $("nav").innerHTML = NAV.map(([k, l, p]) => `<button data-nav="${k}" ${ui.view === k || (k === "cards" && ui.view === "words") ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24">${p}</svg>${l}${k === "cards" && due ? `<span class="dot">${due > 99 ? "99+" : due}</span>` : ""}</button>`).join("");
 }
 
 function vToday() {
@@ -435,11 +435,11 @@ function vToday() {
   return `<div class="hello"><div><div class="eyebrow">${new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div><h2>Hallo! Wie geht's?</h2></div>
     <div class="streak"><b>${streak()}</b>day streak</div></div>
   <section class="card"><h2>Today's hour</h2>
-   ${step(log.c || (!due && total), "Review cards · 15 min", due ? `${due} card${due > 1 ? "s" : ""} due` : (total ? "All caught up" : "Cards appear after your first lesson"), due ? `<button class="btn small primary" data-start-review>Review</button>` : "")}
+   ${step(log.c || (!due && total), "Review cards · 15 min", due ? `${due} card${due > 1 ? "s" : ""} due` : (total ? "All caught up. Add some new words?" : "Start with 10 everyday words"), due ? `<button class="btn small primary" data-start-review>Review</button>` : `<button class="btn small ${total ? "" : "primary"}" data-core-add data-then-review>+ ${corePerDay()} words</button>`)}
    ${step(log.l, "Lesson · 20 min", nl ? esc(nl.title) + " · " + nl.lvl : "Course complete", nl ? `<button class="btn small primary" data-open-lesson="${nl.id}">Start</button>` : "")}
    ${step(log.t, "Speak · 10 min", esc(dr.title) + " · " + dr.lvl, `<button class="btn small" data-open-drill="${dr.id}">Speak</button>`)}
    ${step(log.r, "Read & listen · 10 min", esc(st.title) + " · " + st.lvl, `<button class="btn small" data-open-story="${st.id}">Read</button>`)}
-   ${step(log.w, "Watch German · any time", esc(tier.shows[0][0]) + " · " + tier.subs, `<button class="btn small" data-watch>+30 min</button>`)}
+   ${step(log.w, "Watch German · any time", esc(tier.shows[0][0]) + " · " + tier.subs, `<span class="btnrow tight">${showUrl(tier.shows[0][0]) ? extLink(showUrl(tier.shows[0][0]), "Open ↗", "btn small") : ""}<button class="btn small" data-watch title="Log 30 minutes of watching">+30 min</button></span>`)}
    ${(() => { const open = GW.list().filter(g => gameInfo(g).ready); if (!open.length) return "";
       const g = open.slice().sort((a, b) => (((S.games || {})[a.id] || {}).plays || 0) - (((S.games || {})[b.id] || {}).plays || 0))[0];
       return step(log.g, "Play · 5 min", g.icon + " " + esc(g.name) + " · " + esc(g.skill), `<button class="btn small" data-game-start="${g.id}">Play</button>`); })()}
@@ -454,17 +454,24 @@ function vToday() {
   <p class="note">Everything works offline. Your progress is saved on this phone; make a backup now and then from the Progress tab.</p>`;
 }
 
+// Shows in the series ladder that have a free online home (resources.js)
+const SHOW_RES = { "Nicos Weg": "nicos-weg", "Easy German street interviews": "easy-german", "Langsam gesprochene Nachrichten": "lgn", "Tatort": "ard-mediathek" };
+const showUrl = name => { const r = SHOW_RES[name] && (window.RESOURCES || []).find(x => x.id === SHOW_RES[name]); return r ? r.url : null; };
+
 function vLessons() {
   if (ui.lesson && LESSONS[ui.lesson]) return vLesson(ui.lesson);
   if (ui.test && PHASES.some(p => p.id === ui.test)) return vTest(ui.test);
   const nl = nextLesson();
+  const cur = (nl && PHASES.find(p => p.lessons.some(l => l[0] === nl.id))) || PHASES[PHASES.length - 1];
+  const isOpen = p => (ui.ph || {})[p.id] ?? p.id === cur.id; // only the phase you're in is open, unless you open others
   return `<p class="intro">${ALL.length} lessons from your first word to C1. Each has an explanation, examples, a dialogue, new words for your cards and 7 exercises.</p>
+  ${!ALL.some(l => S.done[l.id]) ? `<p class="tip"><b>Already know some German?</b> Open a level's test. Score 80% and you can mark that level's lessons as done and start where you really are.</p>` : ""}
   ${canSpeak() ? `<div class="listen-cta"><button class="btn" data-car-start>🚗 Car mode: listen from ${nl ? "lesson " + nl.n + " (" + esc(nl.title) + ")" : "the start"}</button></div>` : ""}` +
-    PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length;
-      return `<section class="card"><div class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h2>${p.name}</h2><div class="when">${p.when} · ${d}/${p.lessons.length} done</div></div></div>
-      <div>${p.lessons.map((l, i) => { const done = S.done[l[0]], isNext = nl && nl.id === l[0];
-        return `<button class="lrow ${done ? "done" : ""} ${isNext ? "next" : ""}" data-open-lesson="${l[0]}"><span class="num">${String(i + 1).padStart(2, "0")}</span><span>${esc(l[1])}</span><span class="st">${done ? "✓ " + (S.scores[l[0]] ?? "") + "%" : isNext ? "NEXT" : "›"}</span></button>`; }).join("")}${(() => { const t = (S.tests || {})[p.id];
-        return `<button class="lrow test ${t && t.best >= 80 ? "done" : ""}" data-open-test="${p.id}"><span class="num">✎</span><span>Level test</span><span class="st">${t ? "best " + t.best + "%" : d === p.lessons.length ? "READY" : "›"}</span></button>`; })()}</div></section>`; }).join("");
+    PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length, open = isOpen(p);
+      return `<section class="card phase ${open ? "open" : ""}"><button class="phase-head" data-phase-toggle="${p.id}" aria-expanded="${open}"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h2>${p.name}${p.id === cur.id ? ` <small class="now">you are here</small>` : ""}</h2><div class="when">${p.when} · ${d}/${p.lessons.length} done</div><div class="pbar thin"><i style="width:${Math.round(100 * d / p.lessons.length)}%"></i></div></div><span class="chev">${open ? "▾" : "▸"}</span></button>
+      ${open ? `<div>${p.lessons.map((l, i) => { const done = S.done[l[0]], isNext = nl && nl.id === l[0], sc = S.scores[l[0]];
+        return `<button class="lrow ${done ? "done" : ""} ${isNext ? "next" : ""}" data-open-lesson="${l[0]}"><span class="num">${String(i + 1).padStart(2, "0")}</span><span>${esc(l[1])}</span><span class="st">${done ? "✓" + (sc != null ? " " + sc + "%" : "") : isNext ? "NEXT" : "›"}</span></button>`; }).join("")}${(() => { const t = (S.tests || {})[p.id];
+        return `<button class="lrow test ${t && t.best >= 80 ? "done" : ""}" data-open-test="${p.id}"><span class="num">✎</span><span>Level test</span><span class="st">${t ? "best " + t.best + "%" : d === p.lessons.length ? "READY" : "›"}</span></button>`; })()}</div>` : ""}</section>`; }).join("");
 }
 
 // Lesson 1's narration walks through every sound with example words; show the same walk-through on the page,
@@ -556,7 +563,9 @@ function vTest(pid) {
     if (t.lastKey !== keys.join()) { S.tests[pid] = { best: Math.max(t.best || 0, pct), last: pct, lastKey: keys.join() }; saveS(); logAct("l"); }
     result = `<section class="card"><h2>${pct >= 80 ? "Bestanden! You passed." : "Not yet: " + pct + "%"}</h2>
       <p>${ok} of ${keys.length} right (${pct}%). ${pct >= 80 ? "This level is solid. Move on with confidence." : "80% is a pass. Look at the explanations above, revisit those lessons, then try a new set."}</p>
-      <div class="btnrow"><button class="btn primary" data-test-retry="${pid}">Try a new set</button><button class="btn" data-back>Back to lessons</button></div></section>`;
+      ${pct >= 80 && p.lessons.some(l => !S.done[l[0]]) ? `<p class="tip">Already know this level? You can mark its ${p.lessons.filter(l => !S.done[l[0]]).length} unfinished lessons as done and go on to the next level. You can still open them any time.</p>
+      <div class="btnrow"><button class="btn primary" data-test-skip="${pid}">Mark ${esc(p.lvl)} as done and move on</button></div>` : ""}
+      <div class="btnrow"><button class="btn ${pct >= 80 ? "" : "primary"}" data-test-retry="${pid}">Try a new set</button><button class="btn" data-back>Back to lessons</button></div></section>`;
   }
   return `<button class="btn ghost back" data-back>‹ All lessons</button>
   <div class="lesson-title"><span class="badge ${best >= 80 ? "done" : ""}">${p.lvl}</span><div><div class="eyebrow">Level test · ${esc(p.name)}</div><h2>${keys.length} questions from all ${p.lessons.length} lessons</h2></div></div>
@@ -572,8 +581,12 @@ function vListening(id) {
     if (it.kind === "choose") return `<div class="q">${head}<div class="opts">${it.opts.map((o, j) => { let c = ""; if (s) { if (j === it.ans) c = "right"; else if (s.given === j) c = "wrong"; } return `<button class="opt ${c}" data-lis-choice="${k}:${j}" ${s ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div>${s ? `<div class="fb ${s.ok ? "ok" : "no"}">${s.ok ? "Richtig! " : "Not quite. "}You heard: <b>${esc(it.text)}</b></div>` : ""}</div>`;
     return `<div class="q">${head}${s ? `<div class="fb ${s.ok ? "ok" : "no"}"><b>${esc(s.given)}</b><br>${s.ok ? (s.close ? "Almost! Check the spelling: " : "Richtig! ") : "Not quite. It was: "}<b>${esc(it.text)}</b><br><span class="note">${esc(it.en)}</span></div>` :
       `<div class="btnrow"><input class="field" style="flex:1;min-width:0" id="lis-${k}" placeholder="Schreib, was du hörst" autocomplete="off" autocapitalize="sentences" spellcheck="false"><button class="btn small primary" data-lis-write="${k}">Check</button></div>`}</div>`; }).join("");
-  return `<section class="card"><h3>Listening · ${ok}/${items.length}</h3><p class="note">No text this time: listen first, as often as you like. Slow plays it at a gentler speed.</p><div>${rows}</div></section>`;
+  return `<section class="card" id="ls-listen"><h3>Listening · ${ok}/${items.length}</h3><p class="note">No text this time: listen first, as often as you like. Slow plays it at a gentler speed.</p><div>${rows}</div></section>`;
 }
+// ▶ next to a German line: only when it can be played (a recording, or a phone voice)
+const sayBtn = (text, alt, attr) => clipUrl("de", alt, text) || synth ? ` <button class="say" ${attr} aria-label="Listen">▶</button>` : "";
+// a row of chips that jump to the sections of a long page
+const jumpBar = items => `<nav class="jump chips scroll" aria-label="Sections">${items.filter(Boolean).map(([id, label]) => `<button class="chip" data-jump="${id}">${label}</button>`).join("")}</nav>`;
 function vLesson(id) {
   const M = BYID[id], L = LESSONS[id], st = ex[id] || {};
   const n = L.e.length, answered = Object.keys(st).length, ok = Object.values(st).filter(x => x.ok).length;
@@ -587,16 +600,18 @@ function vLesson(id) {
   return `<button class="btn ghost back" data-back>‹ All lessons</button>
   <div class="lesson-title"><span class="badge ${S.done[id] ? "done" : ""}">${PHASES.find(p => p.id === M.phase).lvl}</span><div><div class="eyebrow">Lesson ${M.n} · ${PHASES.find(p => p.id === M.phase).name}</div><h2>${esc(M.title)}</h2></div></div>
   ${canSpeak() ? `<div class="listen-cta"><button class="btn primary" data-listen-lesson="${id}">🎧 Listen to this lesson</button><span class="note">Narrated in English with German examples, pauses to repeat and a spoken quiz. Works in the car.</span></div>` : ""}
-  <section class="card"><div class="prose">${L.i.split(/\n\n+/).map(p => `<p>${md(p)}</p>`).join("")}</div>${t}</section>
+  ${jumpBar([["ls-explain", "Explanation"], ["ls-ex", "Examples"], ["ls-dlg", "Dialogue"], ["ls-words", "Words"], canSpeak() && ["ls-listen", "Listening"], ["ls-practice", "Practice"], (window.LESSON_LINKS || {})[id] && ["ls-more", "Learn more"]])}
+  <section class="card" id="ls-explain"><div class="prose">${L.i.split(/\n\n+/).map(p => `<p>${md(p)}</p>`).join("")}</div>${t}</section>
   ${L.ai ? soundBySound(L.ai) : ""}
-  <section class="card"><h3>Examples</h3><div>${L.x.map(e => `<div class="ex"><span class="es">${esc(e[0])}</span><span class="en">${esc(e[1])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-ex")}</div></section>
-  <section class="card"><h3>Dialogue</h3><p class="note">Tap a line to see the English.</p><div>${L.d.map(d => `<div class="line" data-reveal><span class="who">${esc(d[0])}</span><span>${esc(d[1])}</span><span class="en" hidden>${esc(d[2])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-dlg", "Listen to the dialogue")}</div></section>
-  <section class="card"><h3>New words</h3><p class="note">These go into your cards when you finish the lesson.</p><div class="vocab">${L.v.map(v => `<div><b>${esc(v[0])}</b><span>${esc(v[1])}</span></div>`).join("")}</div></section>
+  <section class="card" id="ls-ex"><h3>Examples</h3><div>${L.x.map((e, i) => `<div class="ex"><span class="es">${esc(e[0])}${sayBtn(e[0], false, `data-say-ex="${i}"`)}</span><span class="en">${esc(e[1])}</span></div>`).join("")}</div><div class="btnrow">${listenBtn("data-speak-ex")}</div></section>
+  <section class="card" id="ls-dlg"><h3>Dialogue</h3><p class="note">Tap a line to see the English, or ▶ to hear it.</p><div>${(() => { const who = [...new Set(L.d.map(x => x[0]))]; return L.d.map((d, i) => `<div class="line" data-reveal><span class="who">${esc(d[0])}</span><span>${esc(d[1])}${sayBtn(d[1], who.indexOf(d[0]) % 2 === 1, `data-say-dl="${i}"`)}</span><span class="en" hidden>${esc(d[2])}</span></div>`).join(""); })()}</div><div class="btnrow">${listenBtn("data-speak-dlg", "Listen to the dialogue")}</div></section>
+  <section class="card" id="ls-words"><h3>New words</h3><p class="note">These go into your cards when you finish the lesson.</p><div class="vocab">${L.v.map(v => `<div><b>${esc(v[0])}${sayBtn(cleanWord(v[0]), false, `data-say-word="${esc(cleanWord(v[0]))}"`)}</b><span>${esc(v[1])}</span></div>`).join("")}</div></section>
   ${L.tip ? `<div class="tip"><b>Tip · </b>${esc(L.tip)}</div>` : ""}
   ${vListening(id)}
   ${vReview(id)}
-  <section class="card"><h3>Practice · ${ok}/${n}</h3><div>${exs}</div>
-   <div class="btnrow"><button class="btn primary" data-finish="${id}" ${answered < n ? "disabled" : ""}>${S.done[id] ? "Finish again" : "Finish lesson"}</button>${answered < n ? `<span class="note">Answer all ${n} to finish.</span>` : ""}</div></section>`;
+  <section class="card" id="ls-practice"><h3>Practice · ${ok}/${n}</h3><div>${exs}</div>
+   <div class="btnrow"><button class="btn primary" data-finish="${id}" ${answered < n ? "disabled" : ""}>${S.done[id] ? "Finish again" : "Finish lesson"}</button>${answered < n ? `<span class="note">Answer all ${n} to finish.</span>` : ""}</div></section>
+  ${lessonLinks(id)}`;
 }
 
 function vCards() {
@@ -607,28 +622,97 @@ function vCards() {
     const c = decks[cur.deck].cards[cur.i], front = ui.dir === "de" ? c.de : c.en, back = ui.dir === "de" ? c.en : c.de, b = c.b || 0;
     const lab = x => { const d = INT[Math.min(7, x)]; return d === 0 ? "today" : d === 1 ? "1 day" : d < 30 ? d + " days" : Math.round(d / 30) + " mo"; };
     return `<div class="btnrow" style="justify-content:space-between"><span class="eyebrow">${review.queue.length} left</span><button class="btn ghost" data-end-review>End</button></div>
-    <section class="card flash"><div class="front">${esc(front)}</div>${review.shown ? `<div class="back">${esc(back)}</div>${c.ex ? `<div class="exs">${esc(c.ex)}</div>` : ""}` : ""}${listenBtn("data-speak-card")}</section>
-    ${review.shown ? `<div class="grade"><button class="btn" data-grade="0">Again<small>today</small></button><button class="btn primary" data-grade="1">Good<small>${lab(b + 1)}</small></button><button class="btn" data-grade="2">Easy<small>${lab(b + 2)}</small></button></div>` : `<button class="btn primary" data-show>Show answer</button>`}`;
+    <section class="card flash"><div class="front">${esc(front)}</div>${review.shown ? `<div class="back">${esc(back)}</div>${c.ex ? `<div class="exs">${esc(c.ex)}</div>` : ""}${memoryTips(c)}` : ""}${listenBtn("data-speak-card")}</section>
+    ${review.shown ? `<div class="grade"><button class="btn" data-grade="0">Again<small>today</small></button><button class="btn primary" data-grade="1">Good<small>${lab(b + 1)}</small></button><button class="btn" data-grade="2">Easy<small>${lab(b + 2)}</small></button></div>` : `<button class="btn primary" data-show>Show answer</button>`}
+    ${matchMedia("(hover: hover) and (pointer: fine)").matches ? `<p class="note keys">Keys: Space shows the answer · 1 Again · 2 Good · 3 Easy</p>` : ""}`;
   }
   const known = all.filter(x => (x.c.b || 0) >= 3).length;
-  return `<section class="card"><h2>Flashcards</h2>
+  return `<section class="card dict-open"><button class="lrow" data-nav-go="words"><span class="num">📖</span><span>Dictionary<br><small class="note">Search ${dictionary().length.toLocaleString()} words, or browse them by level and topic</small></span><span class="st">›</span></button></section>
+  <section class="card"><h2>Flashcards</h2>
     <div class="stats" style="grid-template-columns:repeat(3,1fr)"><div class="stat"><b>${due.length}</b><span>due now</span></div><div class="stat"><b>${known}</b><span>known</span></div><div class="stat"><b>${all.length}</b><span>total</span></div></div>
     <div class="btnrow"><button class="btn primary" data-start-review ${due.length ? "" : "disabled"}>${due.length ? "Review " + Math.min(due.length, 60) + (due.length === 1 ? " card" : " cards") : "Nothing due"}</button>
     <span class="seg" role="group" aria-label="Direction"><button data-dir="de" aria-pressed="${ui.dir === "de"}">DE → EN</button><button data-dir="en" aria-pressed="${ui.dir === "en"}">EN → DE</button></span></div>
     <p class="note">Cards you know come back less often: tomorrow, then in 3 days, a week, two weeks, a month. Say the answer out loud before you tap Show answer.</p></section>
-  ${CORE.length ? (() => { const pos = get("corePos", 0), auto = get("coreAuto", false), n = corePerDay();
-    return `<section class="card"><h3>Core 2,000 words</h3>
-    <p class="note">The ${CORE.length.toLocaleString()} most common words of everyday German, most frequent first, with articles, plurals and irregular forms. Words you already have from lessons are skipped. ${pos ? `You're at word ${pos.toLocaleString()} of ${CORE.length.toLocaleString()}.` : ""}</p>
-    <div class="pbar"><i style="width:${Math.round(100 * pos / CORE.length)}%"></i></div>
+  ${CORE.length ? (() => { const src = wordSrc(), list = wordList(src), pos = wordPos(src), auto = get("coreAuto", false), n = corePerDay();
+    const about = src === "core"
+      ? `The ${CORE.length.toLocaleString()} most common words of everyday German, most frequent first.`
+      : `${list.length.toLocaleString()} more words for ${src}: what textbooks and the Goethe-Institut expect at this level beyond the Core deck and the lessons.`;
+    return `<section class="card"><h3>New words</h3>
+    <div class="btnrow"><span class="seg" role="group" aria-label="Word list">${WORD_SRCS.map(s => `<button data-word-src="${s}" aria-pressed="${s === src}">${s === "core" ? "Core 2,000" : s}${wordPos(s) >= wordList(s).length ? " ✓" : ""}</button>`).join("")}</span></div>
+    <p class="note">${about} Nouns come with their article and plural, irregular verbs with their past forms. Words you already have are skipped. ${pos ? `You're at word ${Math.min(pos, list.length).toLocaleString()} of ${list.length.toLocaleString()}.` : ""}</p>
+    <div class="pbar"><i style="width:${Math.round(100 * Math.min(pos, list.length) / list.length)}%"></i></div>
     <div class="btnrow"><span class="seg" role="group" aria-label="New words per day">${[5, 10, 20].map(k => `<button data-core-n="${k}" aria-pressed="${n === k}">${k} a day</button>`).join("")}</span>
-    <button class="btn" data-core-add ${pos >= CORE.length ? "disabled" : ""}>Add ${n} now</button></div>
+    <button class="btn" data-core-add ${WORD_SRCS.every(s => wordPos(s) >= wordList(s).length) ? "disabled" : ""}>Add ${n} now</button></div>
     ${coreMsg ? `<p class="note"><b>${esc(coreMsg)}</b></p>` : ""}
-    <label class="note carauto"><input type="checkbox" id="coreAuto" ${auto ? "checked" : ""}> Add ${n} new words automatically each day</label></section>`; })() : ""}
+    <label class="note carauto"><input type="checkbox" id="coreAuto" ${auto ? "checked" : ""}> Add ${n} new words automatically each day</label>
+    <p class="note">When a list is finished, the next one starts.</p></section>`; })() : ""}
+  ${memoryGuide()}
   <section class="card"><h3>Add your own card</h3>
     <div class="btnrow"><input class="field" style="flex:1 1 140px;min-width:0" id="newDe" placeholder="Deutsch" autocomplete="off"><input class="field" style="flex:1 1 140px;min-width:0" id="newEn" placeholder="English" autocomplete="off"><button class="btn" data-add-card>Add</button></div></section>
   ${all.length ? `<section class="card"><h3>Your decks</h3><div>${Object.entries(decks).map(([k, d]) => `<div class="show"><span class="n">${esc(d.title || k)}</span><span class="w">${(d.cards || []).length} cards</span></div>`).join("")}</div></section>` : `<p class="note">Finish a lesson and its new words appear here.</p>`}`;
 }
 
+/* ---------------- dictionary: search and browse every word by level and topic ---------------- */
+// Entries come from the lessons, the Core deck and the level lists; word-topics.js gives each a topic (and Core
+// words a level). The first time a word appears wins, so a word taught in an A1 lesson is listed as A1.
+const LVLS = ["A1", "A2", "B1", "B2", "C1"], WT = window.WORD_TOPICS || { topics: [], core: "", coreLevel: "", levels: {}, lessons: {} };
+let DICT = null;
+const fold = s => norm(String(s)).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+function dictionary() {
+  if (DICT) return DICT;
+  const seen = new Map(), out = [];
+  const add = (de, en, note, lvl, t) => {
+    const word = cleanWord(de), key = fold(word.split(/, /)[0].replace(/^(der\/die|der|die|das|sich) /, "")); // "der Arzt / die Ärztin" = Arzt
+    if (!key) return;
+    if (seen.has(key)) { const e = seen.get(key); e.lvl = Math.min(e.lvl, lvl); if (!e.note && note) e.note = note; return; } // lowest level wins
+    const ti = t && t !== "-" ? t.charCodeAt(0) - 97 : WT.topics.length - 1;
+    const e = { de, word, en: String(en || ""), note: note || "", lvl, topic: ti, key, ken: fold(en) };
+    seen.set(key, e); out.push(e);
+  };
+  for (const l of ALL) if (LESSONS[l.id]) (LESSONS[l.id].v || []).forEach((v, i) => add(v[0], v[1], "", Math.max(0, LVLS.indexOf(l.lvl)), (WT.lessons[l.id] || "")[i]));
+  CORE.forEach((w, i) => add(w[0], w[1], w[2], (+WT.coreLevel[i] || 3) - 1, WT.core[i]));
+  LVLS.forEach((lv, li) => (LEVEL_WORDS[lv] || []).forEach((w, i) => add(w[0], w[1], w[2], li, (WT.levels[lv] || "")[i])));
+  return (DICT = out);
+}
+const dict = { q: "", lvl: null, topic: null, n: 60, open: null };
+function dictFind() {
+  const all = dictionary(), q = fold(dict.q.replace(/^\s*(der|die|das|sich)\s+/i, ""));
+  let list = all.filter(e => (dict.lvl == null || e.lvl === dict.lvl) && (dict.topic == null || e.topic === dict.topic));
+  if (!q) return list;
+  const rank = e => e.key === q ? 0 : e.key.startsWith(q) ? 1 : new RegExp(`(^| )${q}( |$)`).test(e.ken) ? 2 : e.key.includes(q) ? 3 : e.ken.includes(q) ? 4 : 9;
+  return list.map(e => [rank(e), e]).filter(x => x[0] < 9).sort((a, b) => a[0] - b[0] || a[1].key.length - b[1].key.length).map(x => x[1]);
+}
+const inCards = () => new Set(allCards().map(x => norm(cleanWord(x.c.de))));
+function dictRows() {
+  const list = dictFind(), have = inCards(), T = WT.topics;
+  if (!list.length) return `<p class="note">${dict.q ? `No word matches “${esc(dict.q)}”.` : "No words here."}</p>`;
+  const head = `<p class="note">${list.length.toLocaleString()} word${list.length === 1 ? "" : "s"}${dict.lvl != null ? " · " + LVLS[dict.lvl] : ""}${dict.topic != null ? " · " + esc(T[dict.topic][1]) : ""}</p>`;
+  const rows = list.slice(0, dict.n).map(e => { const k = esc(e.key), mine = have.has(norm(e.word)), open = dict.open === e.key;
+    return `<div class="dword ${open ? "open" : ""}"><button class="drow" data-dict-open="${k}"><b>${esc(e.de)}</b><span>${esc(e.en)}</span><span class="dtag">${LVLS[e.lvl]}${T[e.topic] ? " " + T[e.topic][2] : ""}${mine ? " ✓" : ""}</span></button>
+      ${open ? `<div class="dmore">${e.note ? `<div class="exs">${esc(e.note)}</div>` : ""}${memoryTips({ de: e.de, en: e.en })}
+        <div class="btnrow">${canSpeak() ? `<button class="btn small" data-say-word="${esc(e.word)}">▶ Listen</button>` : ""}
+        <button class="btn small ${mine ? "" : "primary"}" data-dict-add="${k}" ${mine ? "disabled" : ""}>${mine ? "✓ In your cards" : "+ Add to my cards"}</button>
+        <button class="btn small ghost" data-dict-topic="${e.topic}">More ${esc(T[e.topic] ? T[e.topic][1] : "")}</button></div></div>` : ""}</div>`; }).join("");
+  const more = list.length > dict.n ? `<button class="btn" data-dict-more>Show more (${(list.length - dict.n).toLocaleString()} left)</button>` : "";
+  const addTen = list.some(e => !have.has(norm(e.word))) && (dict.lvl != null || dict.topic != null) ? `<button class="btn small primary" data-dict-add10>+ Add 10 of these to my cards</button>` : "";
+  return head + (addTen ? `<div class="btnrow">${addTen}</div>` : "") + `<div class="dlist">${rows}</div>` + more;
+}
+function vWords() {
+  const T = WT.topics, all = dictionary();
+  const cnt = (f) => all.filter(f).length;
+  return `<button class="btn ghost back" data-nav-go="cards">‹ Cards</button>
+  <section class="card"><h2>Dictionary</h2>
+    <input class="field" id="dictQ" type="search" placeholder="Search German or English: Arzt, doctor…" value="${esc(dict.q)}" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%">
+    <h4>Level</h4><div class="chips scroll">${LVLS.map((l, i) => `<button class="chip" data-dict-lvl="${i}" aria-pressed="${dict.lvl === i}">${l} <small>${cnt(e => e.lvl === i).toLocaleString()}</small></button>`).join("")}</div>
+    <h4>Topic</h4><div class="chips scroll">${T.map((t, i) => `<button class="chip" data-dict-topic="${i}" aria-pressed="${dict.topic === i}">${t[2]} ${esc(t[1])} <small>${cnt(e => e.topic === i).toLocaleString()}</small></button>`).join("")}</div>
+    ${dict.lvl != null || dict.topic != null || dict.q ? `<button class="btn small ghost" data-dict-clear>Clear search and filters</button>` : ""}</section>
+  <section class="card" id="dictRes">${dict.q || dict.lvl != null || dict.topic != null ? dictRows() : `<p class="note">Type a word, or pick a level or a topic (or both, like B2 and Work).</p>`}</section>`;
+}
+function dictAdd(entries) {
+  const byLvl = {};
+  for (const e of entries) (byLvl[e.lvl] = byLvl[e.lvl] || []).push([e.de, e.en, e.note || ""]);
+  for (const [l, items] of Object.entries(byLvl)) addCards("dict-" + LVLS[l], "Dictionary " + LVLS[l], items);
+}
 function vSpeak() {
   if (ui.drill) { const D = DRILLS.find(x => x.id === ui.drill); if (D) return vDrill(D); }
   const lv = workLevel();
@@ -646,10 +730,13 @@ function vDrill(D) {
     cur = `<div class="msg ai"><span>${esc(t[0])}</span><span class="tr" id="drillTr" hidden>${esc(t[1])}</span><span class="acts"><button class="btn small ghost" data-drill-tr>English</button>${canSpeak() ? `<button class="btn small ghost" data-say-line>▶ Listen</button>` : ""}</span></div>
     <div class="tip"><b>Your turn · </b>${esc(t[2])}</div>
     ${r ? `<div class="msg me">${esc(r.given)}</div><div class="fb ${r.grade === "good" ? "ok" : "no"}">${r.grade === "good" ? "Richtig! " : r.grade === "close" ? "Close! A natural answer: " : "A natural answer: "}<b>${esc(t[3])}</b>${canSpeak() ? ` <button class="btn small ghost" data-say-model>▶</button>` : ""}</div><div class="btnrow"><button class="btn primary" data-drill-next>${drill.step + 1 < D.turns.length ? "Next" : "Finish"}</button>${r.grade !== "good" ? `<button class="btn small ghost" data-drill-right>I was right</button>` : ""}</div>` :
-      `<div class="composer" style="grid-template-columns:1fr auto"><textarea class="field" id="drillBox" rows="2" placeholder="Antworte auf Deutsch…" autocapitalize="sentences" spellcheck="false"></textarea><button class="btn primary" data-drill-check>Check</button></div><button class="btn small ghost" data-drill-skip style="justify-self:start">Show me the answer</button>`}`; }
+      `<div class="composer" style="grid-template-columns:1fr auto"><textarea class="field" id="drillBox" rows="2" placeholder="Antworte auf Deutsch…" autocapitalize="sentences" spellcheck="false"></textarea><button class="btn primary" data-drill-check>Check</button></div>
+      ${drill.hint ? `<div class="hintline">💡 ${esc(t[3].split(/\s+/).slice(0, drill.hint).join(" "))}${drill.hint < t[3].split(/\s+/).length ? " …" : ""}</div>` : ""}
+      <div class="btnrow"><button class="btn small ghost" data-drill-hint ${drill.hint >= t[3].split(/\s+/).length ? "disabled" : ""}>💡 ${drill.hint ? "One more word" : "Hint: how does it start?"}</button><button class="btn small ghost" data-drill-skip>Show me the answer</button></div>`}`; }
   const good = drill.results.filter(r => r && r.grade === "good").length;
   return `<button class="btn ghost back" data-drill-back>‹ All role-plays</button>
-  <section class="card"><div class="eyebrow">${D.lvl} · ${esc(D.who)}</div><h2>${esc(D.title)}</h2></section>
+  <section class="card"><div class="eyebrow">${D.lvl} · ${esc(D.who)}</div><h2>${esc(D.title)}</h2>
+   <div class="drill-prog"><span>${done ? "Finished" : `Turn ${drill.step + 1} of ${D.turns.length}`}</span><div class="pbar"><i style="width:${Math.round(100 * drill.step / D.turns.length)}%"></i></div></div></section>
   <div class="chat">${past}${cur}</div>
   ${done ? `<section class="card"><h3>Gut gemacht!</h3><p>${good} of ${D.turns.length} answers matched a natural reply. Try it again tomorrow without looking.</p><div class="btnrow"><button class="btn primary" data-drill-restart>Do it again</button><button class="btn" data-drill-back>Other role-plays</button></div></section>` : ""}`;
 }
@@ -659,33 +746,80 @@ function vRead() {
   const lv = workLevel();
   return `<section class="card"><h2>Read & listen</h2><p class="note">Short stories set in Germany, from A1 to C1. ${canSpeak() ? "Try listening first with the text blurred, then read." : "Tap a paragraph for the English."}</p></section>` +
     ["A1", "A2", "B1", "B2", "C1"].map(l => { const ss = STORIES.filter(x => x.lvl === l);
-      return `<section class="card"><div class="phase-head"><span class="badge ${lvlIdx(l) < lvlIdx(lv) ? "done" : ""}">${l}</span><div class="t"><h3>${l === lv ? "Your level" : l}</h3></div></div><div>${ss.map(s => `<button class="lrow ${S.done[s.id] ? "done" : ""}" data-open-story="${s.id}"><span class="num">${s.p.length}¶</span><span>${esc(s.title)}</span><span class="st">${S.done[s.id] ? "✓" : "›"}</span></button>`).join("")}</div></section>`; }).join("");
+      return `<section class="card"><div class="phase-head"><span class="badge ${lvlIdx(l) < lvlIdx(lv) ? "done" : ""}">${l}</span><div class="t"><h3>${l === lv ? "Your level" : l}</h3></div></div><div>${ss.map(s => `<button class="lrow ${S.done[s.id] ? "done" : ""}" data-open-story="${s.id}"><span class="num">${s.p.length}¶</span><span>${esc(s.title)}</span><span class="st">${S.done[s.id] ? "✓" : "›"}</span></button>`).join("")}</div></section>`; }).join("") + vMaterials();
+}
+
+/* ---------------- free materials outside the app (resources.js) ---------------- */
+const RES = window.RESOURCES || [], RKIND = window.RESOURCE_KINDS || {};
+const resById = id => RES.find(r => r.id === id);
+const extLink = (url, inner, cls = "") => `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
+function resItem(r) {
+  const k = RKIND[r.kind] || ["🔗", ""];
+  return extLink(r.url, `<span class="rk">${k[0]}</span><span class="rt"><b>${esc(r.name)}</b> <small class="note">${esc(r.by)} · ${esc(k[1])} · ${r.lv.join(", ")}</small><br>${esc(r.what)}${r.cost ? `<br><small class="note">${esc(r.cost)}</small>` : ""}</span><span class="st">↗</span>`, "lrow res");
+}
+function vMaterials() {
+  if (!RES.length) return "";
+  const lv = ui.resLvl || workLevel(), list = RES.filter(r => r.lv.includes(lv));
+  const kinds = Object.keys(RKIND).filter(k => list.some(r => r.kind === k));
+  return `<section class="card" id="materials"><h2>Free materials</h2>
+    <p class="note">More free German from Deutsche Welle, the Goethe-Institut, German TV and others, picked for each level. These open in your browser and need the internet.</p>
+    <div class="chips scroll">${LVLS.map(l => `<button class="chip" data-res-lvl="${l}" aria-pressed="${l === lv}">${l}${l === workLevel() ? " · you" : ""}</button>`).join("")}</div>
+    ${kinds.map(k => `<h4>${RKIND[k][0]} ${esc(RKIND[k][1])}</h4><div>${list.filter(r => r.kind === k).map(resItem).join("")}</div>`).join("")}</section>`;
+}
+function lessonLinks(id) {
+  const links = (window.LESSON_LINKS || {})[id];
+  if (!links || !links.length) return "";
+  const rows = links.map(x => {
+    if (x.length === 1) { const r = resById(x[0]); return r ? resItem(r) : ""; }
+    const [label, url, by] = x, r = resById(by), k = RKIND[(r && r.kind) || "grammar"];
+    return extLink(url, `<span class="rk">${k[0]}</span><span class="rt"><b>${esc(label)}</b> <small class="note">${esc(r ? r.name : "")}</small><br>${esc(r ? (r.kind === "grammar" ? "The same topic explained another way, with more examples and a free exercise." : r.what) : "")}</span><span class="st">↗</span>`, "lrow res");
+  }).join("");
+  return `<section class="card" id="ls-more"><h3>Learn more</h3><p class="note">Free pages on this lesson's topic. They open in your browser and need the internet.</p><div>${rows}</div></section>`;
 }
 function vStory(s) {
-  const stt = storyState[s.id] || (storyState[s.id] = { answers: {}, blur: false, added: false });
+  const stt = storyState[s.id] || (storyState[s.id] = { answers: {}, blur: false, added: false }), tr = get("storyTr", false);
   const qs = s.q.map((q, i) => { const a = stt.answers[i]; return `<div class="q"><div class="qt">${esc(q[0])}</div><div class="opts">${q[1].map((o, j) => { let c = ""; if (a !== undefined) { if (j === q[2]) c = "right"; else if (a === j) c = "wrong"; } return `<button class="opt ${c}" data-sq="${i}:${j}" ${a !== undefined ? "disabled" : ""}>${esc(o)}</button>`; }).join("")}</div></div>`; }).join("");
   return `<button class="btn ghost back" data-story-back>‹ All stories</button>
   <section class="card ${stt.blur ? "blur" : ""}"><div class="eyebrow">${s.lvl} story</div><h2>${esc(s.title)}</h2>
    ${canSpeak() ? `<div class="btnrow"><button class="btn small primary" data-story-listen>▶ Listen</button><button class="btn small" data-stop>Stop</button><button class="btn small" data-blur>${stt.blur ? "Show text" : "Blur text"}</button></div>` : ""}
-   <div>${s.p.map(p => `<div class="para" data-reveal><span class="es">${esc(p[0])}</span><span class="en" hidden>${esc(p[1])}</span></div>`).join("")}</div></section>
+   <label class="note carauto"><input type="checkbox" id="storyTr" ${tr ? "checked" : ""}> Show the English under each line</label>
+   ${tr ? "" : `<p class="note">Tap a paragraph to see its English.</p>`}
+   <div>${(s.lines || s.p.map(p => [p])).map(lines => `<div class="para" data-reveal>${lines.map(([de, en]) => `<div class="ln"><span class="es">${esc(de)}${clipUrl("de", false, de) ? ` <button class="say" data-story-line="${esc(de)}" aria-label="Listen to this line">▶</button>` : ""}</span><span class="en" ${tr ? "" : "hidden"}>${esc(en)}</span></div>`).join("")}</div>`).join("")}</div></section>
   <section class="card"><h3>Words</h3><div class="vocab">${s.g.map(g => `<div><b>${esc(g[0])}</b><span>${esc(g[1])}</span></div>`).join("")}</div>
    <button class="btn small" data-story-cards ${stt.added ? "disabled" : ""}>${stt.added ? "Added to your cards" : "Add these words to my cards"}</button></section>
   <section class="card"><h3>Did you understand?</h3><div>${qs}</div></section>`;
 }
 
+// "Your German": level, streak, and the words you know at each level, out of all the words the app teaches there
+function vYourGerman() {
+  const box = new Map(allCards().map(x => [norm(cleanWord(x.c.de)), x.c.b || 0]));
+  const rows = LVLS.map((l, i) => { const ws = dictionary().filter(e => e.lvl === i); let known = 0, learning = 0;
+    for (const e of ws) { const b = box.get(norm(e.word)); if (b == null) continue; if (b >= 3) known++; else learning++; }
+    return [l, ws.length, known, learning]; });
+  const known = allCards().filter(x => (x.c.b || 0) >= 3).length, lv = level();
+  return `<section class="card" id="pg-you"><h2>Your German</h2>
+    <div class="stats"><div class="stat"><b>${lv}</b><span>level</span></div><div class="stat"><b>${streak()}</b><span>day streak</span></div><div class="stat"><b>${known.toLocaleString()}</b><span>words known</span></div><div class="stat"><b>${Math.round(S.hours)}</b><span>hours heard</span></div></div>
+    <h4>Words you know, by level</h4>
+    <div class="wlv">${rows.map(([l, total, k, g]) => `<div class="wrow"><span class="badge small">${l}</span><div class="wbar" title="${k} known, ${g} learning, of ${total}"><i class="k" style="width:${100 * k / total}%"></i><i class="g" style="width:${100 * g / total}%"></i></div><span class="wn">${k.toLocaleString()} / ${total.toLocaleString()}</span></div>`).join("")}</div>
+    <p class="note"><span class="key k"></span> known (a card you've got right a few times) · <span class="key g"></span> learning. Add words from Cards → New words or the dictionary.</p></section>`;
+}
 function vProgress() {
   const h = S.hours, max = 1600, next = HOUR_MARKS.find(m => h < m[0]);
-  return `<section class="card"><h2>Your roadmap</h2><p class="note">A phase counts as reached when 80% of its lessons are done. Lessons tick themselves; tick milestones yourself.</p></section>` +
-  PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length;
-    return `<section class="card"><div class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h3>${p.name}</h3><div class="note">${p.when} · ${d}/${p.lessons.length} lessons</div></div></div><p>${esc(p.goal)}</p>
-    <div>${p.milestones.map(([id, t, sub]) => { const ms = t.startsWith("★"); return `<label class="check" for="m-${id}"><input type="checkbox" id="m-${id}" data-ms="${id}" ${S.done[id] ? "checked" : ""}><span><span class="${ms ? "ms" : ""}">${esc(ms ? t.slice(1) : t)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</span></label>`; }).join("")}</div></section>`; }).join("") +
-  `<section class="card"><h2>Listening hours</h2>
+  return `${jumpBar([["pg-you", "Summary"], ["pg-road", "Roadmap"], ["pg-hours", "Hours"], ["pg-set", "Settings & backup"]])}
+  ${vYourGerman()}
+  <section class="card" id="pg-road"><h2>Your roadmap</h2><p class="note">A phase counts as reached when 80% of its lessons are done. Lessons tick themselves; tick milestones yourself. Tap a phase to open it.</p></section>` +
+  PHASES.map(p => { const d = p.lessons.filter(l => S.done[l[0]]).length, nl = nextLesson(), cur = nl ? p.lessons.some(l => l[0] === nl.id) : p === PHASES[PHASES.length - 1];
+    const msDone = p.milestones.filter(m => S.done[m[0]]).length;
+    return `<section class="card"><details ${cur ? "open" : ""}><summary class="phase-head"><span class="badge ${d === p.lessons.length ? "done" : ""}">${p.lvl}</span><div class="t"><h3>${p.name}${cur ? ` <small class="now">you are here</small>` : ""}</h3><div class="note">${p.when} · ${d}/${p.lessons.length} lessons · ${msDone}/${p.milestones.length} milestones</div></div></summary><p>${esc(p.goal)}</p>
+    <div>${p.milestones.map(([id, t, sub]) => { const ms = t.startsWith("★"); return `<label class="check" for="m-${id}"><input type="checkbox" id="m-${id}" data-ms="${id}" ${S.done[id] ? "checked" : ""}><span><span class="${ms ? "ms" : ""}">${esc(ms ? t.slice(1) : t)}</span>${sub ? `<small>${esc(sub)}</small>` : ""}</span></label>`; }).join("")}</div></details></section>`; }).join("") +
+  `<section class="card" id="pg-hours"><h2>Listening hours</h2>
     <div class="hours-big">${(Math.round(h * 4) / 4).toLocaleString()}<small>hours of German heard</small></div>
     <div class="ladder" aria-hidden="true"><div class="track"></div><div class="fill" style="width:${Math.min(100, h / max * 100)}%"></div>${HOUR_MARKS.map(([v, l]) => `<div class="mk ${h >= v ? "hit" : ""}" style="left:${v / max * 100}%">${v}<br>${l}</div>`).join("")}</div>
     <p class="note">${next ? `${(next[0] - h).toLocaleString(undefined, { maximumFractionDigits: 2 })} h to the ${next[1]} mark.` : "Past 1,600 hours."} Count time spent following series, videos and podcasts.</p>
     <div class="btnrow"><button class="btn primary small" data-add="0.25">+15 min</button><button class="btn primary small" data-add="0.5">+30 min</button><button class="btn primary small" data-add="1">+1 h</button><button class="btn small" data-add="-0.25">−15 min</button></div></section>
   <section class="card"><h2>Series ladder</h2><p class="note">Move up a tier when you follow 70–80% without pausing. Watching needs internet; everything else in this app works offline.</p>
    ${SERIES.map(t => `<details><summary>${t.tier} · ${t.lvl} <span class="subs">${t.subs}</span></summary><div>${t.shows.map(s => `<div class="show"><span class="n">${esc(s[0])}</span><span class="w">${esc(s[1])}</span><p>${esc(s[2])}</p></div>`).join("")}</div></details>`).join("")}</section>
+  <h2 class="group-h" id="pg-set">Settings & backup</h2>
   <section class="card"><h2>Voice</h2>
    <p class="note">${!synth ? (IN_APK ? "Lessons use the natural voices built into this app." : "This browser can't read text aloud.") : deVoice ? "Using the German voice: " + esc(deVoice.name) + "." : "No German voice found. On Android, open Settings → System → Languages → Text-to-speech, and download German (Deutsch) for offline use."}</p>
    ${synth ? `<div class="btnrow"><span class="note">Speed</span><span class="seg" role="group" aria-label="Speech speed">${[[0.7, "Slow"], [0.9, "Normal"], [1.05, "Fast"]].map(([r, l]) => `<button data-rate="${r}" aria-pressed="${(ui.rate || 0.9) === r}">${l}</button>`).join("")}</span>${listenBtn("data-test-voice", "Test")}</div>` : ""}</section>
@@ -693,18 +827,21 @@ function vProgress() {
    ${CLIPS && IN_APK ? `<p class="note">All ${CLIPS.size.toLocaleString()} natural voice clips are built into this app, so every lesson plays offline.</p>` : CLIPS ? `<p class="note">${CLIPS.size.toLocaleString()} natural voice clips for the narrated lessons. They play from the internet and are kept on the phone once heard. To listen offline (car, plane), download them all once on Wi-Fi.</p>
    <div class="btnrow"><button class="btn primary" data-dl-audio ${dl.on ? "disabled" : ""}>${dl.on ? "Downloading…" : "Download all lesson audio (about " + Math.max(1, Math.round(CLIPS.size * 0.012)) + " MB)"}</button></div>
    <p class="note" id="audMsg">${esc(dl.msg)}</p>` : `<p class="note">Natural voices aren't available yet (or can't be reached offline). Lessons use your phone's voice instead.</p>`}</section>
-  <section class="card"><h2>Credits</h2><p class="note">Narration voices made with Neuphonic's open models: ${AUDINFO && AUDINFO.voices ? esc(Object.values(AUDINFO.voices).join("; ")) : "NeuTTS (Neuphonic)"}. Audio decoding: NeuCodec (Neuphonic). Speech generated on a home PC; no internet service is used while you learn.</p>
-   ${AUDINFO && AUDINFO.credits ? `<div>${AUDINFO.credits.map(c => `<div class="show"><span class="n">${esc(c.who)}</span><span class="w">${esc(c.license)}</span><p>${esc(c.what)}</p></div>`).join("")}</div>` : ""}</section>
   <section class="card"><h2>Backup</h2><p class="note">Your progress lives only on this phone. Save a backup file now and then, especially before ${IN_APK ? "uninstalling the app" : "clearing browser data"} or changing phones.</p>
    <div class="btnrow"><button class="btn" data-export>Save backup file</button><label class="btn" for="importFile">Restore from file</label><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="note" id="backupMsg"></p></section>
+  <section class="card"><details><summary><h2>Credits</h2></summary><p class="note">Narration voices made with Neuphonic's open models: ${AUDINFO && AUDINFO.voices ? esc(Object.values(AUDINFO.voices).join("; ")) : "NeuTTS (Neuphonic)"}. Audio decoding: NeuCodec (Neuphonic). Speech generated on a home PC; no internet service is used while you learn.</p>
+   ${AUDINFO && AUDINFO.credits ? `<div>${AUDINFO.credits.map(c => `<div class="show"><span class="n">${esc(c.who)}</span><span class="w">${esc(c.license)}</span><p>${esc(c.what)}</p></div>`).join("")}</div>` : ""}</details></section>
   <button class="reset" id="resetBtn">Reset all progress</button><div id="resetConfirm" hidden class="btnrow"><span class="note">Clear lessons, cards, ticks and hours?</span><button class="btn small" id="resetYes">Yes, reset</button><button class="btn small" id="resetNo">Cancel</button></div>`;
 }
 
 function render() {
   header();
+  const hb = document.querySelector("header.top"); if (hb) document.documentElement.style.setProperty("--hdr", hb.offsetHeight + "px"); // sticky bars sit under it
   if (ui.view === "games" && G.running) return; // never wipe a game that's being played
-  const v = { today: vToday, lessons: vLessons, cards: vCards, speak: vSpeak, read: vRead, games: vGames, progress: vProgress }[ui.view] || vToday;
+  const v = { today: vToday, lessons: vLessons, cards: vCards, speak: vSpeak, read: vRead, games: vGames, progress: vProgress, words: vWords }[ui.view] || vToday;
   $("view").innerHTML = v();
+  // dictionary: keep the chosen level/topic visible in its sideways-scrolling row
+  document.querySelectorAll('.chips.scroll [aria-pressed="true"]').forEach(b => { const row = b.parentElement; row.scrollLeft = b.offsetLeft - row.offsetLeft - (row.clientWidth - b.offsetWidth) / 2; });
 }
 
 /* ---------------- games (framework in games.js) ---------------- */
@@ -712,12 +849,14 @@ const GW = window.WIDGames || { list: () => [] };
 const G = { running: false, game: null, items: [], i: 0, score: 0, streak: 0, missed: [], pool: [], result: null };
 const gameApi = {
   done: () => ALL.filter(l => S.done[l.id] && LESSONS[l.id]).map(l => l.id),
+  all: () => ALL.filter(l => LESSONS[l.id]).map(l => ({ id: l.id, lvl: ["A1", "A2", "B1", "B2", "C1"].indexOf(l.lvl) })), // every lesson, lvl 0..4
   lesson: id => LESSONS[id], meta: id => BYID[id],
   level: () => Math.max(0, ["A0", "A1", "A2", "B1", "B2", "C1"].indexOf(level()) - 1),
   say: t => speak(t), canSay: () => canSpeak(), cleanWord: w => cleanWord(w),
+  cards: () => allCards().map(x => x.c), // your flashcards: {de, en, b (box 0–7), d (due)}
 };
 function gameInfo(g) {
-  const pool = g.pool(gameApi), unlocked = !!S.done[g.unlock], ready = unlocked && pool.length >= g.minItems;
+  const pool = g.pool(gameApi), unlocked = !g.unlock || !!S.done[g.unlock], ready = unlocked && pool.length >= g.minItems;
   const sc = (S.games || {})[g.id] || {};
   return { pool, unlocked, ready, sc };
 }
@@ -732,18 +871,18 @@ function vGames() {
       <p>${r.best ? "🏆 New best score!" : "Best: " + ((S.games || {})[g.id] || {}).best + " / " + r.total}</p>
       ${r.missed.length ? `<p class="note">These go back into your flashcards for review:</p><div class="vocab">${r.missed.map(m => `<div><b>${esc(m)}</b></div>`).join("")}</div>` : `<p class="note">No mistakes. Perfekt!</p>`}
       <div class="btnrow"><button class="btn primary" data-game-start="${g.id}">Play again</button><button class="btn" data-game-back>All games</button></div></section>`; }
-  const done = gameApi.done().length;
-  return `<section class="card"><h2>Play</h2><p class="note">Games use only what you've learned: each finished lesson adds its words, sentences and grammar. Words you miss go back into your flashcards.</p></section>` +
-    GW.list().map(g => { const i = gameInfo(g), unl = BYID[g.unlock];
+  return `<section class="card"><h2>Play</h2><p class="note">Games use only what you've learned: each finished lesson adds its words, sentences and grammar, and every word in your flashcards plays too. Words you find hard come up more often, rounds get harder as your level rises, and words you miss go back into your flashcards.</p></section>` +
+    GW.list().map(g => [g, gameInfo(g)]).sort((a, b) => b[1].ready - a[1].ready).map(([g, i]) => { const unl = BYID[g.unlock];
       return `<section class="card g-card ${i.ready ? "" : "locked"}"><div class="phase-head"><span class="g-icon">${g.icon}</span><div class="t"><h3>${esc(g.name)}</h3><div class="note">${esc(g.skill)}${i.sc.best != null ? " · best " + i.sc.best : ""}</div></div>
         ${i.ready ? `<button class="btn primary small" data-game-start="${g.id}">Play</button>` : ""}</div>
         <p>${esc(g.blurb)}</p>
-        <p class="note">${!i.unlocked ? `🔒 Unlocks after lesson ${unl ? unl.n + ": " + esc(unl.title) : g.unlock}` : i.ready ? `${i.pool.length} puzzles from your ${done} finished lessons` : `Needs a few more finished lessons (${i.pool.length}/${g.minItems})`}</p></section>`; }).join("");
+        <p class="note">${!i.unlocked ? `🔒 Unlocks after lesson ${unl ? unl.n + ": " + esc(unl.title) : g.unlock}` : i.ready ? `${i.pool.length} puzzles from your lessons and cards` : `Needs a few more words (${i.pool.length}/${g.minItems}): add some to your cards or finish a lesson.`}</p>
+        ${!i.unlocked && unl ? `<button class="btn small" data-open-lesson="${unl.id}">Go to lesson ${unl.n}</button>` : !i.ready ? `<button class="btn small primary" data-core-add>+ Add ${corePerDay()} words to my cards</button>` : ""}</section>`; }).join("");
 }
 function gameStart(id) {
   const g = GW.list().find(x => x.id === id); if (!g) return;
   const pool = g.pool(gameApi); if (pool.length < g.minItems) return;
-  Object.assign(G, { running: true, game: g, pool, items: GW.pick(pool, Math.min(pool.length, g.round(gameApi))), i: 0, score: 0, streak: 0, missed: [], result: null });
+  Object.assign(G, { running: true, game: g, pool, items: (GW.smartPick || GW.pick)(pool, Math.min(pool.length, g.round(gameApi))), i: 0, score: 0, streak: 0, missed: [], result: null });
   ui.view = "games"; header();
   $("view").innerHTML = `<div class="g-top"><button class="btn ghost" data-game-quit>✕ Quit</button><b>${G.game.icon} ${esc(G.game.name)}</b><span class="g-score" id="gScore"></span></div><div class="g-prog"><i id="gProg"></i></div><div class="g-stage" id="gStage"></div>`;
   gameNext();
@@ -774,12 +913,54 @@ function startReview() { const due = shuffle(dueCards()).slice(0, 60); if (!due.
 const CORE = window.CORE_WORDS || [];
 const corePerDay = () => get("corePerDay", 10);
 let coreMsg = "";
+// "How to remember words": a short guide on the Cards screen.
+const GUIDE = [
+  ["Recall, don't reread", "Look at the front, say the answer out loud, then turn the card. Pulling a word out of memory is what makes it stick; reading it again does almost nothing. Be honest: if you hesitated, press Again."],
+  ["Little and often", "10 new words a day and every card that's due beats 100 words once a week. The cards come back just before you'd forget them: tomorrow, in 3 days, a week, two weeks, a month. Missing a day is fine; missing a week means a pile."],
+  ["Learn the noun with its article", "Never learn Tisch, learn der Tisch. Picture der words as blue, die words as red, das words as green, or give each a place: der words live in the garden, die words in the kitchen, das words in the bathroom. Endings help: -ung, -heit, -keit, -schaft, -ion and -tät are die; -chen and -lein are das; -ling and -ismus are der."],
+  ["Hear it and say it", "Tap ▶ and copy the voice. Words you've said out loud a few times come back faster when you need to speak, and you learn where the stress goes."],
+  ["Break long words up", "Most long German words are short words glued together: Haus + Tür = Haustür, Arbeit + Platz = Arbeitsplatz. The last part decides the gender: die Tür → die Haustür. The 💡 tips on the cards show the parts when the app knows them."],
+  ["Know the prefixes", "Separable prefixes jump to the end (anrufen → Ich rufe dich an). Some inseparable prefixes carry a meaning: zer- breaks things (zerbrechen), ent- takes away (entfernen), ver- often goes wrong (sich verlaufen = to get lost). Learn one verb and you can guess its family."],
+  ["Make it about you", "When a word is hard, make a short sentence about your own life with it: Mein Arbeitsweg dauert 20 Minuten. A sentence you made up yourself is much easier to remember than a translation."],
+  ["Use a silly picture", "For stubborn words, link the sound to a picture: der Schmetterling (butterfly) sounds like smatter-ling: a butterfly smattered with paint. The sillier the picture, the better it sticks."],
+  ["Learn chunks, not single words", "Learn verbs with their preposition (warten auf, sich freuen über) and phrases as one piece (eine Entscheidung treffen, in Frage kommen). That's how you'll need them in a sentence."],
+  ["Watch out for false friends", "Some words look like English but mean something else: bekommen is to get, das Gift is poison, der Chef is the boss, eventuell is possibly. The cards warn you about these."],
+  ["Then use them", "Play the games: they use your own cards and bring back the words you find hard. Read the stories, try the Speak drills, and when a word turns up in a series, you'll notice it. Every time you meet a word again, it sticks better."],
+];
+function memoryGuide() {
+  return `<section class="card"><details><summary>🧠 How to remember words</summary>
+    ${GUIDE.map(([h, p], i) => `<h4>${i + 1}. ${esc(h)}</h4><p>${esc(p)}</p>`).join("")}
+    <p class="tip">A good day: review every due card (10–15 minutes), add 10 new words, then play one game. That's about 3,000 new words a year.</p></details></section>`;
+}
+// Memory tips under the answer (memory.js): gender clue, plural, compound parts, prefix verbs, false friends.
+function memoryTips(c) {
+  const tips = window.WID_memoryTips ? window.WID_memoryTips(c.de, c.en) : [];
+  return tips.length ? `<ul class="mtips">${tips.map(t => `<li>${esc(t)}</li>`).join("")}</ul>` : "";
+}
+// Word lists by level (level-words.js): A1–C1 add the words each level needs beyond the Core deck and the lessons.
+const LEVEL_WORDS = window.LEVEL_WORDS || {};
+const WORD_SRCS = ["core", ...["A1", "A2", "B1", "B2", "C1"].filter(l => (LEVEL_WORDS[l] || []).length)];
+const wordSrc = () => { const s = get("wordSrc", "core"); return WORD_SRCS.includes(s) ? s : "core"; };
+const wordList = s => s === "core" ? CORE : LEVEL_WORDS[s] || [];
+const wordPos = s => s === "core" ? get("corePos", 0) : (get("lvlPos", {})[s] || 0);
+const setWordPos = (s, p) => { if (s === "core") return put("corePos", p); const o = get("lvlPos", {}); o[s] = p; put("lvlPos", o); };
+// Adds up to n new cards from the chosen list; when it runs out, carries on with the next unfinished list.
 function addCoreWords(n) {
-  const have = new Set(allCards().map(x => norm(cleanWord(x.c.de)))), items = [];
-  let pos = get("corePos", 0);
-  while (pos < CORE.length && items.length < n) { const w = CORE[pos++]; if (!have.has(norm(cleanWord(w[0])))) items.push([w[0], w[1], w[2] || ""]); }
-  put("corePos", pos); if (items.length) addCards("core", "Core 2,000 words", items);
-  return items.length;
+  const have = new Set(allCards().map(x => norm(cleanWord(x.c.de))));
+  let src = wordSrc(), total = 0;
+  for (let tries = 0; tries < WORD_SRCS.length && total < n; tries++) {
+    const list = wordList(src), items = [];
+    let pos = wordPos(src);
+    while (pos < list.length && total + items.length < n) { const w = list[pos++]; const k = norm(cleanWord(w[0])); if (!have.has(k)) { have.add(k); items.push([w[0], w[1], w[2] || ""]); } }
+    setWordPos(src, pos);
+    if (items.length) addCards(src === "core" ? "core" : "lvl-" + src, src === "core" ? "Core 2,000 words" : src + " words", items);
+    total += items.length;
+    if (pos < list.length) break;
+    const next = WORD_SRCS.find(s => wordPos(s) < wordList(s).length);
+    if (!next) break;
+    src = next; put("wordSrc", src);
+  }
+  return total;
 }
 function addCards(deckId, title, items) {
   const t = today(), d = decks[deckId] || { title, cards: [] }, have = new Set(d.cards.map(c => norm(c.de)));
@@ -822,7 +1003,8 @@ async function downloadAudio() {
   render();
 }
 function exportBackup() {
-  const data = { app: "weg-ins-deutsche", version: 1, saved: new Date().toISOString(), progress: S, decks, storyState };
+  const words = Object.fromEntries(["corePos", "lvlPos", "wordSrc", "corePerDay", "coreAuto"].map(k => [k, get(k, null)]).filter(([, v]) => v !== null));
+  const data = { app: "weg-ins-deutsche", version: 1, saved: new Date().toISOString(), progress: S, decks, storyState, words };
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "deutsch-backup-" + today() + ".json";
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -833,6 +1015,7 @@ function importBackup(file) {
   r.onload = () => { const m = $("backupMsg");
     try { const d = JSON.parse(r.result); if (d.app !== "weg-ins-deutsche" || !d.progress) throw 0;
       S = Object.assign({ done: {}, hours: 0, days: {}, scores: {} }, d.progress); decks = d.decks || {}; storyState = d.storyState || {};
+      for (const [k, v] of Object.entries(d.words || {})) if (["corePos", "lvlPos", "wordSrc", "corePerDay", "coreAuto"].includes(k)) put(k, v);
       saveS(); saveDecks(); put("storyState", storyState); render(); const m2 = $("backupMsg"); if (m2) m2.textContent = "Backup restored.";
     } catch (e) { if (m) m.textContent = "That file isn't a backup from this app."; } };
   r.readAsText(file);
@@ -843,12 +1026,30 @@ $("nav").addEventListener("click", e => { const b = e.target.closest("[data-nav]
 $("view").addEventListener("click", e => {
   const t = e.target.closest("button,[data-reveal]") || e.target, d = t.dataset || {};
   if (d.navGo) return go(d.navGo);
+  if (d.phaseToggle) { ui.ph = ui.ph || {}; ui.ph[d.phaseToggle] = t.getAttribute("aria-expanded") !== "true"; return render(); }
+  if (d.testSkip) { const p = PHASES.find(x => x.id === d.testSkip);
+    if (p) { p.lessons.forEach(l => { S.done[l[0]] = true; }); saveS(); ui.test = null; ui.ph = {}; saveUI(); render(); window.scrollTo(0, 0); } return; }
+  if (d.resLvl) { ui.resLvl = d.resLvl; render(); const m = $("materials"); if (m) m.scrollIntoView({ block: "start" }); return; }
+  // dictionary
+  const dictRes = () => { const r = $("dictRes"); if (r) r.innerHTML = dictRows(); };
+  if (d.dictOpen !== undefined) { dict.open = dict.open === d.dictOpen ? null : d.dictOpen; return dictRes(); }
+  if (d.dictLvl !== undefined) { dict.lvl = dict.lvl === +d.dictLvl ? null : +d.dictLvl; dict.n = 60; dict.open = null; return render(); }
+  if (d.dictTopic !== undefined) { const t = +d.dictTopic, fromRow = !!e.target.closest(".dmore");
+    if (fromRow) { dict.topic = t; dict.lvl = null; dict.q = ""; } else dict.topic = dict.topic === t ? null : t;
+    dict.n = 60; dict.open = null; render(); if (fromRow) window.scrollTo(0, 0); return; }
+  if (d.dictClear !== undefined) { Object.assign(dict, { q: "", lvl: null, topic: null, n: 60, open: null }); return render(); }
+  if (d.dictMore !== undefined) { dict.n += 60; return dictRes(); }
+  if (d.dictAdd !== undefined) { const en = dictionary().find(x => x.key === d.dictAdd); if (en) dictAdd([en]); header(); return dictRes(); }
+  if (d.dictAdd10 !== undefined) { const have = inCards(); const pick = dictFind().filter(x => !have.has(norm(x.word))).slice(0, 10);
+    dictAdd(pick); header(); dictRes(); const r = $("dictRes"); if (r) r.insertAdjacentHTML("afterbegin", `<p class="note"><b>${pick.length} word${pick.length === 1 ? "" : "s"} added to your cards. They're due now.</b></p>`); return; }
   if (d.gameStart) return gameStart(d.gameStart);
   if (d.gameQuit !== undefined) { G.running = false; G.result = null; stopSpeak(); return render(); }
   if (d.gameBack !== undefined) { G.result = null; return render(); }
   if (d.startReview !== undefined) return startReview();
   if (d.coreN) { put("corePerDay", +d.coreN); return render(); }
-  if (d.coreAdd !== undefined) { const k = addCoreWords(corePerDay()); put("coreDay", today()); coreMsg = k ? `${k} new word${k === 1 ? "" : "s"} added. They're due now.` : "No new words left."; return render(); }
+  if (d.wordSrc) { put("wordSrc", d.wordSrc); coreMsg = ""; return render(); }
+  if (d.coreAdd !== undefined) { const k = addCoreWords(corePerDay()); put("coreDay", today()); coreMsg = k ? `${k} new word${k === 1 ? "" : "s"} added. They're due now.` : "No new words left.";
+    if (k && d.thenReview !== undefined) return startReview(); return render(); }
   if (d.openLesson) { ui.view = "lessons"; ui.lesson = d.openLesson; ui.test = null; saveUI(); render(); return window.scrollTo(0, 0); }
   if (d.openTest) { ui.view = "lessons"; ui.lesson = null; ui.test = d.openTest; saveUI(); render(); return window.scrollTo(0, 0); }
   if (d.testRetry) { S.testTry = S.testTry || {}; S.testTry[d.testRetry] = (S.testTry[d.testRetry] || 0) + 1; saveS(); render(); return window.scrollTo(0, 0); }
@@ -856,7 +1057,7 @@ $("view").addEventListener("click", e => {
   if (d.qChoice) { const [key, j] = d.qChoice.split("|"); qAnswer(key, +j); return render(); }
   if (d.qWrite) { const box = $("q-" + qSafe(d.qWrite)), given = (box && box.value || "").trim(); if (!given) return; qAnswer(d.qWrite, given); return render(); }
   if (d.qPlay || d.qSlow) { const it = qItem(d.qPlay || d.qSlow); return speak([{ text: it.text, alt: it.alt }], d.qSlow ? 0.7 : undefined); }
-  if (d.reveal !== undefined) { const en = t.querySelector(".en"); if (en) en.hidden = !en.hidden; return; }
+  if (d.reveal !== undefined) { const ens = t.querySelectorAll(".en"), show = ens.length && ens[0].hidden; ens.forEach(en => { en.hidden = !show; }); return; }
   if (d.choice) { const [i, j] = d.choice.split(":").map(Number), e2 = LESSONS[ui.lesson].e[i]; (ex[ui.lesson] || (ex[ui.lesson] = {}))[i] = { given: j, ok: j === e2[3] }; return render(); }
   if (d.write !== undefined) return checkWrite(+d.write);
   if (d.lisPlay !== undefined || d.lisSlow !== undefined) { const it = listeningItems(ui.lesson)[+(d.lisPlay ?? d.lisSlow)]; return speak([{ text: it.text, alt: it.alt }], d.lisSlow !== undefined ? 0.7 : undefined); }
@@ -868,7 +1069,11 @@ $("view").addEventListener("click", e => {
   if (d.listenLesson) { P.auto = false; P.car = false; return playerLoad(d.listenLesson, true); }
   if (d.carStart !== undefined) { const nl = nextLesson() || ALL[0]; P.auto = true; P.car = true; return playerLoad(nl.id, true); }
   if (d.sayWord !== undefined) return speak(d.sayWord);
+  if (d.storyLine !== undefined) return speak(d.storyLine);
   if (d.speakEx !== undefined) return speak(LESSONS[ui.lesson].x.map(x => x[0]));
+  if (d.sayEx !== undefined) return speak(LESSONS[ui.lesson].x[+d.sayEx][0]);
+  if (d.sayDl !== undefined) { const D = LESSONS[ui.lesson].d, who = [...new Set(D.map(x => x[0]))], x = D[+d.sayDl]; return speak({ text: x[1], alt: who.indexOf(x[0]) % 2 === 1 }); }
+  if (d.jump) { const el = $(d.jump); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (d.speakDlg !== undefined) { const D = LESSONS[ui.lesson].d, who = [...new Set(D.map(x => x[0]))]; return speak(D.map(x => ({ text: x[1], alt: who.indexOf(x[0]) % 2 === 1 }))); }
   if (d.stop !== undefined) return stopSpeak();
   /* cards */
@@ -884,20 +1089,21 @@ $("view").addEventListener("click", e => {
   /* speak */
   if (d.openDrill) { ui.view = "speak"; ui.drill = d.openDrill; drill = null; saveUI(); render(); return window.scrollTo(0, 0); }
   if (d.drillBack !== undefined) { ui.drill = null; drill = null; saveUI(); return render(); }
+  if (d.drillHint !== undefined) { drill.hint = (drill.hint || 0) + (drill.hint ? 1 : 2); const box = $("drillBox"), v = box ? box.value : ""; render(); const b2 = $("drillBox"); if (b2) { b2.value = v; b2.focus(); } return; }
   if (d.drillTr !== undefined) { const el = $("drillTr"); if (el) el.hidden = !el.hidden; return; }
   if (d.sayLine !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); return speak(D.turns[drill.step][0]); }
   if (d.sayModel !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); return speak(D.turns[drill.step][3]); }
   if (d.drillCheck !== undefined) return drillCheck(false);
   if (d.drillSkip !== undefined) return drillCheck(true);
   if (d.drillRight !== undefined) { drill.pending.grade = "good"; return render(); }
-  if (d.drillNext !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); drill.results[drill.step] = drill.pending; drill.pending = null; drill.step++;
+  if (d.drillNext !== undefined) { const D = DRILLS.find(x => x.id === ui.drill); drill.results[drill.step] = drill.pending; drill.pending = null; drill.step++; drill.hint = 0;
     if (drill.step >= D.turns.length) { S.done[D.id] = true; logAct("t"); }
     render(); const b = $("drillBox"); if (b) b.focus(); return; }
   if (d.drillRestart !== undefined) { drill = null; return render(); }
   /* read */
   if (d.openStory) { ui.view = "read"; ui.story = d.openStory; saveUI(); render(); return window.scrollTo(0, 0); }
   if (d.storyBack !== undefined) { stopSpeak(); ui.story = null; saveUI(); return render(); }
-  if (d.storyListen !== undefined) { const s = STORIES.find(x => x.id === ui.story); speak(s.p.map(p => p[0])); return logAct("r"); }
+  if (d.storyListen !== undefined) { const s = STORIES.find(x => x.id === ui.story); speak(s.audio || s.p.map(p => p[0])); return logAct("r"); }
   if (d.blur !== undefined) { const st = storyState[ui.story]; st.blur = !st.blur; put("storyState", storyState); return render(); }
   if (d.sq) { const [i, j] = d.sq.split(":").map(Number), s = STORIES.find(x => x.id === ui.story), st = storyState[s.id]; st.answers[i] = j; put("storyState", storyState);
     if (Object.keys(st.answers).length >= s.q.length) { S.done[s.id] = true; logAct("r"); } return render(); }
@@ -914,10 +1120,22 @@ $("view").addEventListener("click", e => {
   if (t.id === "resetYes") { S = { done: {}, hours: 0, days: {}, scores: {} }; decks = {}; storyState = {}; review = null; saveS(); saveDecks(); put("storyState", storyState); return render(); }
 });
 $("view").addEventListener("change", e => {
+  if (e.target.id === "storyTr") { put("storyTr", e.target.checked); return render(); }
   if (e.target.id === "coreAuto") { put("coreAuto", e.target.checked); if (e.target.checked && get("coreDay", "") !== today()) { addCoreWords(corePerDay()); put("coreDay", today()); } return render(); }
   const id = e.target.dataset && e.target.dataset.ms;
   if (id) { if (e.target.checked) S.done[id] = true; else delete S.done[id]; saveS(); return header(); }
   if (e.target.id === "importFile" && e.target.files[0]) importBackup(e.target.files[0]);
+});
+$("view").addEventListener("input", e => {
+  if (e.target.id === "dictQ") { dict.q = e.target.value; dict.n = 60; dict.open = null; const r = $("dictRes");
+    if (r) r.innerHTML = dict.q || dict.lvl != null || dict.topic != null ? dictRows() : `<p class="note">Type a word, or pick a level or a topic (or both, like B2 and Work).</p>`; }
+});
+// Card review from a keyboard: Space or Enter shows the answer, then 1 = Again, 2 = Good, 3 = Easy
+document.addEventListener("keydown", e => {
+  if (!review || ui.view !== "cards" || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+  const b = !review.shown && (e.key === " " || e.key === "Enter") ? document.querySelector("[data-show]")
+    : review.shown && /^[123]$/.test(e.key) ? document.querySelector(`[data-grade="${+e.key - 1}"]`) : null;
+  if (b) { e.preventDefault(); b.click(); }
 });
 $("view").addEventListener("keydown", e => {
   if (e.key !== "Enter" || e.shiftKey) return;
